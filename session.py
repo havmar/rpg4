@@ -11,8 +11,12 @@ content.py, and the numbers live in the catalogs.
     python session.py fight --stance press   # resolve the pending fight
     python session.py fight --resume surge   # answer a mid-fight pause
     python session.py odds                   # wind the drum: odds on this fight
+    python session.py stash                  # cache the whole satchel at this depth
     python session.py camp | surface | status | market | log
-    python session.py train edge | buy "salvage axe"
+    python session.py train edge | buy "salvage axe" | buy "oil flask"
+    python session.py use "oil flask"        # spend a piece of kit underground
+    python session.py equip "the still lamp" # put on a relic; there is no taking it off
+    python session.py learn brace            # buy a stance you keep forever
     python session.py sheet -m "message"     # rewrite + commit + push run pages
 """
 
@@ -128,6 +132,17 @@ def cmd_status(cat, args):
              save["wake"]["commission"]["bonus"]))
     if d["salvage"]:
         print("carrying: " + ", ".join("%s(%d)" % (i["name"], i["value"]) for i in d["salvage"]))
+    print("kit %d/%d: %s" % (len(d["kit"]), content.KIT_CAP,
+                            ", ".join(k["name"] for k in d["kit"]) if d["kit"] else "nothing"))
+    if d["relic"]:
+        print("relic: %s -- %s" % (d["relic"]["name"], d["relic"]["text"]))
+    learned = [s for s in d["stances"] if s not in engine.BASE_STANCES]
+    if learned:
+        print("learned stances: " + ", ".join(sorted(learned)))
+    for rec in save["stashes"]:
+        print("cached at depth %d (%d items, worth %d): %s"
+              % (rec["depth"], len(rec["items"]), sum(i["value"] for i in rec["items"]),
+                 ", ".join("%s(%d)" % (i["name"], i["value"]) for i in rec["items"])))
     for mark in d["marks"]:
         print("mark: %s -- %s" % (mark["name"], mark["text"]))
     if exp["fork"]:
@@ -204,6 +219,13 @@ def cmd_fight(cat, args):
     write_save(save)
 
 
+def cmd_stash(cat, args):
+    save = load_save()
+    require_alive(save)
+    say(content.do_stash(save))
+    write_save(save)
+
+
 def cmd_camp(cat, args):
     save = load_save()
     require_alive(save)
@@ -232,14 +254,49 @@ def cmd_buy(cat, args):
     write_save(save)
 
 
+def cmd_use(cat, args):
+    save = load_save()
+    require_alive(save)
+    say(content.do_use(save, args.item))
+    write_save(save)
+
+
+def cmd_equip(cat, args):
+    save = load_save()
+    require_alive(save)
+    say(content.do_equip(cat, save, args.relic))
+    write_save(save)
+
+
+def cmd_learn(cat, args):
+    save = load_save()
+    require_alive(save)
+    say(content.do_learn(save, args.stance))
+    write_save(save)
+
+
 def cmd_market(cat, args):
     save = load_save()
+    d = save["delver"]
     print("THE OUTFITTERS' ROW, WAKE (chits: %d)" % save["wake"]["chits"])
+    print("weapons:")
     for w in cat["weapons"]:
         print("  %-22s %3d chits  (%s, acc %+d)  %s" % (w["name"], w["value"], w["dmg"], w["acc"], w["blurb"]))
+    print("armor:")
     for a in cat["armors"]:
         print("  %-22s %3d chits  (guard +%d, soak %d%s)  %s"
               % (a["name"], a["value"], a["guard"], a["soak"], ", heavy" if a["heavy"] else "", a["blurb"]))
+    print("kit (you carry %d, one of each; it fires itself when its moment comes):"
+          % content.KIT_CAP)
+    for k in cat["kit"]:
+        print("  %-22s %3d chits  %s%s"
+              % (k["name"], k["value"], k["text"],
+                 "  [held]" if any(h["name"] == k["name"] for h in d["kit"]) else ""))
+    unlearned = [s for s in content.LEARNABLE_STANCES if s not in d["stances"]]
+    if unlearned:
+        print("stances (bought knowledge; yours for good):")
+        for stance in unlearned:
+            print("  %-22s %3d chits  %s" % (stance, content.STANCE_COST, content.STANCE_TEXT[stance]))
     print("training: raising a stat to N costs %d*N chits (cap %d)"
           % (content.TRAIN_COST_PER_LEVEL, content.STAT_CAP))
     com = save["wake"]["commission"]
@@ -290,6 +347,8 @@ def main(argv=None):
 
     for name, fn, msg in (("status", cmd_status, "where things stand"),
                           ("camp", cmd_camp, "heal and steady (1 supply, 1 light)"),
+                          ("stash", cmd_stash, "cache the whole satchel at this depth; "
+                                               "it comes back to you when you return here"),
                           ("surface", cmd_surface, "climb out, bank salvage, rest in Wake"),
                           ("market", cmd_market, "what Wake sells"),
                           ("log", cmd_log, "print the full last-fight log")):
@@ -305,9 +364,22 @@ def main(argv=None):
     s.add_argument("stat", choices=engine.STATS)
     s.set_defaults(fn=cmd_train)
 
-    s = sub.add_parser("buy", help="buy gear in Wake")
+    s = sub.add_parser("buy", help="buy gear or kit in Wake")
     s.add_argument("item")
     s.set_defaults(fn=cmd_buy)
+
+    s = sub.add_parser("use", help="spend a piece of kit underground (oil flask, drum key)")
+    s.add_argument("item")
+    s.set_defaults(fn=cmd_use)
+
+    s = sub.add_parser("equip", help="put on a carried relic; the one you were wearing shatters")
+    s.add_argument("relic")
+    s.set_defaults(fn=cmd_equip)
+
+    s = sub.add_parser("learn", help="buy a stance in Wake (%d chits, permanent)"
+                                     % content.STANCE_COST)
+    s.add_argument("stance", choices=content.LEARNABLE_STANCES)
+    s.set_defaults(fn=cmd_learn)
 
     s = sub.add_parser("sheet", help="rewrite the run's pages, commit, and push (one commit per message)")
     s.add_argument("-m", "--message", default=None)

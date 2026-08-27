@@ -24,6 +24,8 @@ CENSUS = {
     "strange": 10,
     "sites": 12,
     "marks": 10,
+    "kit": 6,
+    "relics": 5,
     "names": 40,  # given + family together
 }
 
@@ -62,6 +64,8 @@ _FIELDS = {
     "strange": {"name", "effect", "text", "rumor"},
     "sites": {"name", "kind", "depth", "text"},
     "marks": {"name", "effect", "text"},
+    "kit": {"name", "value", "effect", "text"},
+    "relics": {"name", "value", "effect", "text"},
 }
 
 # declared-optional authored keys: read with a default, never a damage shim.
@@ -157,6 +161,12 @@ def validate_catalog(cat):
     for m in cat["marks"]:
         if m["effect"] not in engine.MARK_EFFECTS:
             raise CatalogError("mark %r has unknown effect %r" % (m["name"], m["effect"]))
+    for k in cat["kit"]:
+        if k["effect"] not in engine.KIT_EFFECTS:
+            raise CatalogError("kit %r has unknown effect %r" % (k["name"], k["effect"]))
+    for r in cat["relics"]:
+        if r["effect"] not in engine.RELIC_EFFECTS:
+            raise CatalogError("relic %r has unknown effect %r" % (r["name"], r["effect"]))
     for site in cat["sites"]:
         if site["kind"] not in SITE_KINDS:
             raise CatalogError("site %r has unknown kind %r" % (site["name"], site["kind"]))
@@ -182,6 +192,8 @@ def load_catalog():
         ("strange.json", ["strange"]),
         ("sites.json", ["sites"]),
         ("marks.json", ["marks"]),
+        ("kit.json", ["kit"]),
+        ("relics.json", ["relics"]),
         ("names.json", list(NAME_LISTS)),
     ):
         with open(os.path.join(CATALOG_DIR, fname), "r", encoding="utf-8") as f:
@@ -231,6 +243,21 @@ def build_encounter(cat, depth, rng):
 
 def roll_salvage(cat, depth, rng):
     return rng.choice(_eligible(cat["salvage"], depth))
+
+
+def is_relic(cat, name):
+    return any(r["name"] == name for r in cat["relics"])
+
+
+def roll_relic(cat, depth, rng):
+    """What a deep salvage floor sometimes holds instead of its first find.
+
+    Only where salvage is the whole point and only below the easy galleries;
+    a second copy of one you already wear is simply money.
+    """
+    if depth < RELIC_MIN_DEPTH or rng.random() >= RELIC_CHANCE:
+        return None
+    return dict(rng.choice(cat["relics"]))
 
 
 def rumor_for(cat, site, rng):
@@ -323,10 +350,30 @@ STAT_CAP = 6
 SCRAP = "scrap glass and fittings"
 ODDS_POLICIES = ("fight_on", "surge", "withdraw")
 
+# the outfitter's shelf
+KIT_CAP = 2                     # how many pieces of kit go down with you
+USABLE_KIT = {"oil": 3, "drumkey": 2}   # effect -> what `use` hands you
+OIL_FLASK_LIGHT = USABLE_KIT["oil"]
+DRUM_KEY_WINDINGS = USABLE_KIT["drumkey"]
+DRESSING_HP_FRAC = 3            # the dressing roll comes out at or under a third
+STANCE_COST = 25                # a stance is bought knowledge, not a stat gate
+LEARNABLE_STANCES = tuple(s for s in sorted(engine.STANCES) if s not in engine.BASE_STANCES)
+STANCE_TEXT = {
+    "brace": "the planted stance (-1 atk, +2 guard, +2 soak); nothing gets its ambush on you",
+    "read": "the study stance (-2 atk, +1 guard); from the third round on you strike at +3",
+}
+# a relic is salvage that refuses to be money: found where salvage is the
+# whole point, deeper than the easy galleries
+RELIC_MIN_DEPTH = 3
+RELIC_CHANCE = 0.12
+
 
 def new_delver(candidate):
     d = dict(candidate)
     d["marks"] = []  # before the derived readers: they all consult it
+    d["kit"] = []    # ... and so do these two
+    d["relic"] = None
+    d["stances"] = list(engine.BASE_STANCES)
     d["hp"] = engine.hp_max(d)
     d["grit"] = engine.grit_max(d)
     d["light"] = engine.light_max(d)
@@ -350,6 +397,7 @@ def new_save(cat, world_seed):
         "expedition": {"active": False, "depth": 0, "sites": [], "pending_site": None,
                        "paused_fight": None, "free_delve": False,
                        "fork": None, "declined": []},
+        "stashes": [],
         "wake": {"chits": 0, "day": 1, "expeditions": 0, "commission": None},
         "history": ["Day 1: %s, %s, went down the great mouth."
                     % (delver["name"], delver["background"])],
@@ -364,24 +412,88 @@ def new_save(cat, world_seed):
 # full" is a reason to climb that is not a punishment.
 
 def take_salvage(delver, name, value):
-    """Put a find in the satchel, or decide what it displaces. Returns lines."""
+    """Put a find in the satchel, or decide what it displaces.
+
+    Returns (taken, lines): `taken` is False only when the satchel is full
+    of better things and the find stays where it lies.
+    """
     if name == SCRAP:
         for carried in delver["salvage"]:
             if carried["name"] == SCRAP:  # scrap merges; it never costs a second slot
                 carried["value"] += value
-                return ["Scrap goes in with the rest (the lot is worth %d)." % carried["value"]]
+                return True, ["Scrap goes in with the rest (the lot is worth %d)." % carried["value"]]
     cap = engine.satchel_cap(delver)
     if len(delver["salvage"]) < cap:
         delver["salvage"].append({"name": name, "value": value})
-        return ["Salvage taken: %s (worth %d) [satchel %d/%d]."
-                % (name, value, len(delver["salvage"]), cap)]
+        return True, ["Salvage taken: %s (worth %d) [satchel %d/%d]."
+                      % (name, value, len(delver["salvage"]), cap)]
     cheapest = min(delver["salvage"], key=lambda i: (i["value"], i["name"]))
     if value > cheapest["value"]:
         delver["salvage"].remove(cheapest)
         delver["salvage"].append({"name": name, "value": value})
-        return ["The satchel is full: you drop %s (worth %d) and take %s (worth %d)."
-                % (cheapest["name"], cheapest["value"], name, value)]
-    return ["The satchel is full; %s (worth %d) stays where it lies." % (name, value)]
+        return True, ["The satchel is full: you drop %s (worth %d) and take %s (worth %d)."
+                      % (cheapest["name"], cheapest["value"], name, value)]
+    return False, ["The satchel is full; %s (worth %d) stays where it lies." % (name, value)]
+
+
+# -------------------------------------------------------------- the stashes
+# Push-your-luck plumbing, not banking: a stash turns satchel weight into a
+# promise to come back. Only surfacing banks; a stash dies with the delver.
+
+def do_stash(save):
+    """Leave the whole satchel at this depth. Returns lines."""
+    delver = save["delver"]
+    exp = save["expedition"]
+    if not exp["active"]:
+        raise ValueError("you cache things in the deep, not in Wake")
+    if exp["paused_fight"] or (exp["pending_site"] and exp["pending_site"].get("enemies")):
+        raise ValueError("you cannot stop to cache anything with something watching you")
+    if exp["fork"]:
+        raise ValueError("choose a passage first; you cache in a room, not in a doorway")
+    if not delver["salvage"]:
+        raise ValueError("the satchel is empty")
+    depth = exp["depth"]
+    items = delver["salvage"]
+    delver["salvage"] = []
+    record = next((s for s in save["stashes"] if s["depth"] == depth), None)
+    if record is None:
+        record = {"depth": depth, "items": []}
+        save["stashes"].append(record)
+        save["stashes"].sort(key=lambda s: s["depth"])
+    record["items"].extend(items)
+    lines = ["You wedge the satchel's whole weight into a hollow at depth %d:" % depth]
+    for item in items:
+        lines.append("  - %s (worth %d)" % (item["name"], item["value"]))
+    lines.append("Cached at depth %d: %d items, worth %d. Worth nothing until you come back."
+                 % (depth, len(record["items"]), sum(i["value"] for i in record["items"])))
+    return lines
+
+
+def recover_stash(save):
+    """Arriving where you left something. Returns lines.
+
+    The cache empties into the satchel most valuable first, under the
+    satchel's own rules; what will not fit stays cached.
+    """
+    delver = save["delver"]
+    depth = save["expedition"]["depth"]
+    record = next((s for s in save["stashes"] if s["depth"] == depth), None)
+    if record is None:
+        return []
+    lines = ["Your cache at depth %d is where you left it." % depth]
+    left = []
+    for item in sorted(record["items"], key=lambda i: (-i["value"], i["name"])):
+        taken, said = take_salvage(delver, item["name"], item["value"])
+        lines.extend(said)
+        if not taken:
+            left.append(item)
+    if left:
+        record["items"] = left
+        lines.append("What will not fit stays cached (%d items, worth %d)."
+                     % (len(left), sum(i["value"] for i in left)))
+    else:
+        save["stashes"].remove(record)
+    return lines
 
 
 # ---------------------------------------------------------- the commission
@@ -488,20 +600,27 @@ def _enter_site(cat, save, site, lines):
     if _darkness(delver):
         lines.append("The lamp is dry. You move in the dark now.")
     exp["sites"].append({"depth": site["depth"], "kind": site["kind"], "name": site["name"]})
+    lines.extend(recover_stash(save))  # you are back where you left something
     rng = _evt_rng(save)
     if site["kind"] == "encounter":
         exp["pending_site"] = site
         lines.append("Something is here: " + ", ".join(site["enemies"]) + ".")
     elif site["kind"] == "salvage":
-        for name in site["salvage"]:
+        names = list(site["salvage"])
+        relic = roll_relic(cat, site["depth"], rng)
+        if relic:
+            names = names[1:]  # it is lying where the first find would have been
+            lines.append("This is not salvage. %s -- %s" % (relic["name"], relic["text"]))
+            lines.extend(take_salvage(delver, relic["name"], relic["value"])[1])
+        for name in names:
             item = by_name(cat["salvage"], name)
-            lines.extend(take_salvage(delver, item["name"], item["value"]))
+            lines.extend(take_salvage(delver, item["name"], item["value"])[1])
         exp["pending_site"] = None
     elif site["kind"] == "strange":
         lines.extend(engine.apply_strange(delver, exp, site["effect"], rng))
         for name in site.get("salvage", []):
             item = by_name(cat["salvage"], name)
-            lines.extend(take_salvage(delver, item["name"], item["value"]))
+            lines.extend(take_salvage(delver, item["name"], item["value"])[1])
         exp["pending_site"] = None
     else:  # breather
         if engine.has_mark(delver, "breather_numb"):
@@ -519,6 +638,9 @@ def start_pending_fight(cat, save, stance):
     site = exp["pending_site"]
     if not site or not site.get("enemies"):
         raise ValueError("no fight is pending")
+    if stance not in save["delver"]["stances"]:
+        raise ValueError("%s is not a stance you know; you know: %s"
+                         % (stance, ", ".join(sorted(save["delver"]["stances"]))))
     specs = [by_name(cat["enemies"], n) for n in site["enemies"]]
     seed = engine.child_seed(save["world_seed"], "fight", save["counter"])
     save["counter"] += 1
@@ -546,6 +668,9 @@ def apply_fight_result(cat, save, result):
     delver["hp"] = result["hp"]
     delver["grit"] = result["grit"]
     delver["light"] = result["light"]
+    for effect in result["kit_used"]:  # the fight spent it; the satchel loses it
+        spent = [k for k in delver["kit"] if k["effect"] == effect][0]
+        delver["kit"].remove(spent)
     save["last_fight"] = {"outcome": result["outcome"], "site": site["name"],
                           "depth": exp["depth"], "events": result["events"]}
     lines = engine.fight_summary(result["events"])
@@ -553,12 +678,12 @@ def apply_fight_result(cat, save, result):
         exp["pending_site"] = None
         scrap = 2 * result["menace_defeated"]
         lines.append("You strip the field: scrap worth %d." % scrap)
-        lines.extend(take_salvage(delver, SCRAP, scrap))
+        lines.extend(take_salvage(delver, SCRAP, scrap)[1])
         rng = _evt_rng(save)
         if rng.random() < 0.7:
             item = roll_salvage(cat, exp["depth"], rng)
             lines.append("Among the wreckage: %s (worth %d)." % (item["name"], item["value"]))
-            lines.extend(take_salvage(delver, item["name"], item["value"]))
+            lines.extend(take_salvage(delver, item["name"], item["value"])[1])
         save["history"].append("Day %d, depth %d: cleared %s (%s)."
                                % (save["wake"]["day"], exp["depth"], site["name"],
                                   ", ".join(site["enemies"])))
@@ -566,6 +691,7 @@ def apply_fight_result(cat, save, result):
         exp["pending_site"] = None
         exp["depth"] = max(0, exp["depth"] - 1)
         lines.append("You fall back to the previous gallery (depth %d)." % exp["depth"])
+        lines.extend(recover_stash(save))
         save["history"].append("Day %d: retreated from %s at depth %d."
                                % (save["wake"]["day"], site["name"], exp["depth"] + 1))
     else:  # down
@@ -573,8 +699,27 @@ def apply_fight_result(cat, save, result):
         lines.append("The expedition ends here. The Understory keeps what it takes.")
         save["history"].append("Day %d: %s went down at depth %d, in %s. The Ledger remembers."
                                % (save["wake"]["day"], delver["name"], exp["depth"], site["name"]))
+    lines.extend(open_dressing(save, result))
     lines.extend(gain_mark(cat, save, result))
     return lines
+
+
+def open_dressing(save, result):
+    """The dressing roll: bought for the walk out of a fight you nearly lost,
+    and spent the moment that walk arrives. Returns lines."""
+    delver = save["delver"]
+    if result["outcome"] == "down" or not delver["alive"] or delver["hp"] <= 0:
+        return []
+    if delver["hp"] * DRESSING_HP_FRAC > engine.hp_max(delver):
+        return []
+    held = [k for k in delver["kit"] if k["effect"] == "dressing"]
+    if not held:
+        return []
+    delver["kit"].remove(held[0])
+    heal = engine.roll_dice("1d6", _evt_rng(save))
+    delver["hp"] = min(engine.hp_max(delver), delver["hp"] + heal)
+    return ["You get the dressing roll open with shaking hands: +%d hp (%s spent)."
+            % (heal, held[0]["name"])]
 
 
 def gain_mark(cat, save, result):
@@ -603,14 +748,22 @@ def do_camp(cat, save):
         raise ValueError("you camp in the deep, not in Wake")
     if exp["paused_fight"] or (exp["pending_site"] and exp["pending_site"].get("enemies")):
         raise ValueError("you cannot camp with something watching you; resolve the fight")
-    if delver["supply"] < 1:
+    tithe = [k for k in delver["kit"] if k["effect"] == "oilbread"]
+    if delver["supply"] < 1 and not tithe:
         raise ValueError("no supply left to camp on")
     rng = _evt_rng(save)
-    delver["supply"] -= 1
+    lines = []
+    if tithe:
+        delver["kit"].remove(tithe[0])
+        lines.append("You break the %s instead of the stores: this night costs no supply."
+                     % tithe[0]["name"])
+    else:
+        delver["supply"] -= 1
     delver["light"] = max(0, delver["light"] - 1)
     heal = engine.camp_heal(delver, rng)
     delver["hp"] = min(engine.hp_max(delver), delver["hp"] + heal)
-    lines = ["You camp cold behind a shard-wall: +%d hp, grit restored, -1 supply, -1 light." % heal]
+    lines.append("You camp cold behind a shard-wall: +%d hp, grit restored, -%d supply, -1 light."
+                 % (heal, 0 if tithe else 1))
     if delver["marks"]:
         mark = delver["marks"].pop()
         lines.append("Dressed and splinted by lamplight: %s is behind you." % mark["name"])
@@ -644,9 +797,13 @@ def do_surface(cat, save):
     commission = save["wake"]["commission"]
     filled = next((i for i in delver["salvage"] if i["name"] == commission["item"]), None)
     if filled:
-        banked += commission["bonus"]
-        lines.append("The standing order is filled: one %s against the posting, +%d chits."
-                     % (commission["item"], commission["bonus"]))
+        # the seal makes a doubling posting a tripling one, for one unit
+        units = 2 if engine.has_relic(delver, "seal") else 1
+        banked += units * commission["bonus"]
+        lines.append("The standing order is filled: one %s against the posting, +%d chits.%s"
+                     % (commission["item"], units * commission["bonus"],
+                        "  (The seal is on the docket; the house pays triple.)"
+                        if units == 2 else ""))
     delver["salvage"] = []
     save["wake"]["chits"] += banked
     save["wake"]["day"] += 1
@@ -725,7 +882,7 @@ def _odds_pending(cat, save, n):
     specs = [by_name(cat["enemies"], nm) for nm in save["expedition"]["pending_site"]["enemies"]]
     dark = _darkness(delver)
     rows = []
-    for stance in sorted(engine.STANCES):
+    for stance in sorted(delver["stances"]):  # the drum answers about lines you can take
         for policy in ODDS_POLICIES:
             if policy == "surge" and delver["grit"] < 2:
                 continue
@@ -780,6 +937,16 @@ def do_train(save, stat):
     return ["%s rises to %d (-%d chits, %d left)." % (stat, new_val, cost, save["wake"]["chits"])]
 
 
+def _pay(save, item_name, cost, verb="bought"):
+    if save["wake"]["chits"] < cost:
+        raise ValueError("%s costs %d chits; you have %d"
+                         % (item_name, cost, save["wake"]["chits"]))
+    save["wake"]["chits"] -= cost
+    save["history"].append("Day %d: %s %s (%d chits)."
+                           % (save["wake"]["day"], verb, item_name, cost))
+    return ["%s is yours (-%d chits, %d left)." % (item_name, cost, save["wake"]["chits"])]
+
+
 def do_buy(cat, save, item_name):
     if save["expedition"]["active"]:
         raise ValueError("the outfitters are in Wake")
@@ -787,15 +954,85 @@ def do_buy(cat, save, item_name):
     for section, slot in (("weapons", "weapon"), ("armors", "armor")):
         for rec in cat[section]:
             if rec["name"] == item_name:
-                if save["wake"]["chits"] < rec["value"]:
-                    raise ValueError("%s costs %d chits; you have %d"
-                                     % (item_name, rec["value"], save["wake"]["chits"]))
-                save["wake"]["chits"] -= rec["value"]
+                lines = _pay(save, item_name, rec["value"])
                 delver[slot] = dict(rec)
-                save["history"].append("Day %d: bought %s (%d chits)."
-                                       % (save["wake"]["day"], item_name, rec["value"]))
-                return ["%s is yours (-%d chits, %d left)." % (item_name, rec["value"], save["wake"]["chits"])]
+                return lines
+    for rec in cat["kit"]:
+        if rec["name"] == item_name:
+            if any(k["name"] == item_name for k in delver["kit"]):
+                raise ValueError("you are already carrying a %s; one of each" % item_name)
+            if len(delver["kit"]) >= KIT_CAP:
+                raise ValueError("you have both hands full: %s (kit holds %d)"
+                                 % (", ".join(k["name"] for k in delver["kit"]), KIT_CAP))
+            lines = _pay(save, item_name, rec["value"])
+            delver["kit"].append(dict(rec))
+            return lines + ["  %s" % rec["text"]]
     raise ValueError("no such item in the market: %r" % item_name)
+
+
+def do_use(save, item_name):
+    """The two pieces of kit that are a verb. The rest fire themselves."""
+    if not save["expedition"]["active"]:
+        raise ValueError("that is for down there; in Wake you buy, you do not spend")
+    delver = save["delver"]
+    held = [k for k in delver["kit"] if k["name"] == item_name]
+    if not held:
+        raise ValueError("you are not carrying any %s" % item_name)
+    item = held[0]
+    if item["effect"] not in USABLE_KIT:
+        raise ValueError("%s is not something you use; it goes off when it is needed" % item_name)
+    delver["kit"].remove(item)
+    if item["effect"] == "oil":
+        delver["light"] += OIL_FLASK_LIGHT
+        return ["You pour off the flask and the flame stands up again: +%d light (%d)."
+                % (OIL_FLASK_LIGHT, delver["light"])]
+    delver["windings"] += DRUM_KEY_WINDINGS
+    return ["The borrowed key turns and the drum takes it: +%d windings (%d)."
+            % (DRUM_KEY_WINDINGS, delver["windings"])]
+
+
+def do_equip(cat, save, relic_name):
+    """Put a relic on. One slot, no unequip, and the old one does not survive
+    being replaced -- the tension is the mechanic."""
+    delver = save["delver"]
+    exp = save["expedition"]
+    if exp["paused_fight"] or (exp["pending_site"] and exp["pending_site"].get("enemies")):
+        raise ValueError("not with something watching you; resolve the fight first")
+    if exp["fork"]:
+        raise ValueError("choose a passage first; you do not stand in a doorway to dress")
+    if not is_relic(cat, relic_name):
+        raise ValueError("that is not a relic: %r" % relic_name)
+    carried = [i for i in delver["salvage"] if i["name"] == relic_name]
+    if not carried:
+        raise ValueError("you are not carrying %s" % relic_name)
+    rec = by_name(cat["relics"], relic_name)
+    delver["salvage"].remove(carried[0])
+    old = delver["relic"]
+    lines = []
+    if old:
+        lines.append("%s comes off and does not survive coming off. There is only ever one."
+                     % old["name"])
+    delver["relic"] = dict(rec)
+    delver["light"] = min(delver["light"], engine.light_max(delver))
+    lines.append("You put on %s -- %s" % (rec["name"], rec["text"]))
+    save["history"].append("Day %d: took up %s%s."
+                           % (save["wake"]["day"], rec["name"],
+                              " (%s shattered)" % old["name"] if old else ""))
+    return lines
+
+
+def do_learn(save, stance):
+    if save["expedition"]["active"]:
+        raise ValueError("you learn that above ground, with someone to show you")
+    if stance not in LEARNABLE_STANCES:
+        raise ValueError("nobody in the haven teaches %r; on offer: %s"
+                         % (stance, ", ".join(LEARNABLE_STANCES)))
+    delver = save["delver"]
+    if stance in delver["stances"]:
+        raise ValueError("you already know %s" % stance)
+    lines = _pay(save, stance, STANCE_COST, verb="learned")
+    delver["stances"].append(stance)
+    return lines + ["  %s" % STANCE_TEXT[stance]]
 
 
 def _evt_rng(save):

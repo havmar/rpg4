@@ -10,7 +10,7 @@ import json
 import random
 import re
 
-SAVE_VERSION = 4
+SAVE_VERSION = 6
 
 STATS = ["edge", "iron", "vim", "nerve", "craft"]
 
@@ -19,13 +19,31 @@ STANCES = {
     "measure": (0, 0, 0, 0),
     "press": (2, -2, 0, 2),
     "ward": (-2, 3, 1, 0),
-    "skirmish": (-1, 1, 0, 0),
+    # skirmish is the stance that plans its exit: it keeps the auto-withdraw
+    # and the prepared exit, and pays for both with attack.
+    "skirmish": (-2, 1, 0, 0),
+    # bought knowledge (content prices them; the engine stays permissive so
+    # benches can drive every stance directly).
+    # brace is the planted stance: nothing gets its ambush on a braced delver.
+    "brace": (-1, 2, 2, 0),
+    # read buys accuracy with the clock -- see READ_ATK_BONUS.
+    "read": (-2, 1, 0, 0),
 }
 
+# what every delver starts knowing; the rest is learned in the haven
+BASE_STANCES = ("measure", "press", "ward", "skirmish")
+
 PAUSE_HP_FRAC = 0.6
-SKIRMISH_FLEE_FRAC = 0.4
+SKIRMISH_FLEE_FRAC = 0.35
 FLEE_LATE_FRAC = 0.25
 LIGHT_CLOCK_ROUNDS = 4
+WITHDRAW_LIGHT_COST = 1
+RELENTLESS_PURSUIT_ATK = 2
+LURKER_AMBUSH_ATK = 4
+# read: from this round on, attacks come at this much over the base (the
+# stance's own -2 makes it net +3). Stateless -- computed at strike time.
+READ_ROUND = 3
+READ_ATK_BONUS = 5
 
 # Marks: small named conditions a hard fight leaves on you. The catalog
 # (catalogs/marks.json) names them; the engine owns what they do.
@@ -34,6 +52,14 @@ MARK_EFFECTS = [
     "camp_heal_half", "light_leak", "breather_numb", "flee_late",
 ]
 MARK_CAP = 3
+
+# Kit: insurance bought at the surface. Triggers are declared at purchase and
+# the fight spends them for you; nothing here adds a mid-fight button.
+# The catalog (catalogs/kit.json) names them; the engine owns what they do.
+KIT_EFFECTS = ["oil", "dressing", "flash", "rope", "oilbread", "drumkey"]
+
+# Relics: salvage that refuses to be money. One slot, worn until you die.
+RELIC_EFFECTS = ["hammer", "still_lamp", "mirror", "bell", "seal"]
 
 
 # ---------------------------------------------------------------- rng / dice
@@ -77,6 +103,21 @@ def has_mark(delver, effect):
     return any(m["effect"] == effect for m in delver["marks"])
 
 
+def has_kit(delver, effect):
+    """Kit is a list of held records; a delver always carries one (possibly
+    empty), so a missing key is a bug, not a case to soften."""
+    if effect not in KIT_EFFECTS:
+        raise ValueError("unknown kit effect: %r" % effect)
+    return any(k["effect"] == effect for k in delver["kit"])
+
+
+def has_relic(delver, effect):
+    if effect not in RELIC_EFFECTS:
+        raise ValueError("unknown relic effect: %r" % effect)
+    relic = delver["relic"]
+    return relic is not None and relic["effect"] == effect
+
+
 def hp_max(delver):
     return 8 + 3 * delver["stats"]["vim"] - (3 if has_mark(delver, "hp_max-3") else 0)
 
@@ -111,7 +152,9 @@ def nerve_bonus(delver):
 
 
 def light_max(delver):
-    return 10 + (2 if delver["knack"] == "lamplighter" else 0)
+    base = 10 + (2 if delver["knack"] == "lamplighter" else 0)
+    # the still lamp never burns down and never burns bright
+    return base - (2 if has_relic(delver, "still_lamp") else 0)
 
 
 def satchel_cap(delver):
@@ -121,7 +164,7 @@ def satchel_cap(delver):
 
 def windings_max(delver):
     """Reckoning-drum windings per expedition. CRAFT again."""
-    return 1 + delver["stats"]["craft"]
+    return 1 + delver["stats"]["craft"] + (1 if has_relic(delver, "seal") else 0)
 
 
 def camp_heal(delver, rng):
@@ -150,6 +193,11 @@ def _combatant_from_delver(delver, stance, darkness):
         "light": delver["light"],
         "flee_frac": FLEE_LATE_FRAC if has_mark(delver, "flee_late") else SKIRMISH_FLEE_FRAC,
         "worst_blow": 0,
+        # what you brought with you, flattened onto the combatant the way
+        # light is: the fight reads flags, not the character sheet
+        "kit": [k["effect"] for k in delver["kit"]],
+        "relic": delver["relic"]["effect"] if delver["relic"] else None,
+        "stances": list(delver["stances"]),
     }
 
 
@@ -193,11 +241,16 @@ def start_fight(delver, enemy_specs, stance, seed, darkness=False):
         "surge": False,
         "withdrawing": False,
         "first_blood": False,
+        "no_ambush": False,
+        "mirror_used": False,
+        "read_seen": False,
+        "kit_used": [],
         "events": [],
         "rng_state": None,
     }
     if darkness:
         _ev(state, 1, "The lamp is out. This happens in the dark.")
+    _throw_flash(state)
     _dread_test(state, rng)
     _save_rng(state, rng)
     return _run(state)
@@ -231,17 +284,21 @@ def resume_fight(state, choice, seed_unused=None):
 
 
 def pause_options(state):
-    """Legal pause choices -> short description."""
+    """Legal pause choices -> short description.
+
+    Stances you have not learned are not on the menu: the pause offers what
+    this delver knows, and nothing else.
+    """
     d = state["delver"]
     opts = {"fight_on": "keep at it, unchanged"}
-    for s in sorted(STANCES):
+    for s in sorted(d["stances"]):
         if s != state["stance"]:
             opts[s] = "switch stance to %s" % s
     if d["shaken"] and d["grit"] >= 1:
         opts["steady"] = "spend 1 grit: shake off the fear"
     if d["grit"] >= 2:
         opts["surge"] = "spend 2 grit: next attack cannot miss and strikes double"
-    opts["withdraw"] = "pull out (every foe still up gets a parting blow)"
+    opts["withdraw"] = "pull out (costs light; what is still chasing sets the rest of the price)"
     return opts
 
 
@@ -288,10 +345,50 @@ def _living(state):
     return [e for e in state["enemies"] if e["hp"] > 0]
 
 
+def _spend_kit(state, effect, text):
+    """Kit fires itself, says so, and is gone. The content layer takes the
+    same item off the delver from result["kit_used"]."""
+    state["delver"]["kit"].remove(effect)
+    state["kit_used"].append(effect)
+    _ev(state, 1, text)
+
+
+def _throw_flash(state):
+    """Flash powder: bought against ambushes, spent the moment one is set."""
+    if "flash" not in state["delver"]["kit"]:
+        return
+    if not any("lurker" in e["traits"] for e in state["enemies"]):
+        return
+    state["no_ambush"] = True
+    _spend_kit(state, "flash",
+               "You put a fistful of flash powder into the dark first. "
+               "Nothing in here gets the jump it was waiting for.")
+
+
+def _ambush_suppressed(state):
+    """Three ways to not be ambushed: powder, the planted stance, or a bell
+    small enough that only the waiting things hear it."""
+    return (state["no_ambush"] or state["stance"] == "brace"
+            or state["delver"]["relic"] == "bell")
+
+
+def _read_bonus(state):
+    """Read is stateless: the pattern is there from round 3 on for as long as
+    you are reading it, and gone the round you stop."""
+    if state["stance"] != "read" or state["round"] < READ_ROUND:
+        return 0
+    if not state["read_seen"]:
+        state["read_seen"] = True
+        _ev(state, 1, "You have their pattern; it repeats.")
+    return READ_ATK_BONUS
+
+
 def _dread_test(state, rng):
     dread = max([e["dread"] for e in state["enemies"]], default=0)
     if state["darkness"] and dread > 0:
         dread += 2
+    if state["delver"]["relic"] == "bell":
+        dread -= 1  # the bell is a small steady sound in a place with none
     if dread <= 0:
         return
     d = state["delver"]
@@ -362,7 +459,7 @@ def _delver_strike(state, rng):
     target = min(living, key=lambda e: (e["hp"], e["id"]))
     flat = d["dmg_bonus"] + (2 if "brittle" in target["traits"] else 0)
     surge = state["surge"]
-    info = _attack(state, rng, "You", d["atk"], d["dmg"], target["id"],
+    info = _attack(state, rng, "You", d["atk"] + _read_bonus(state), d["dmg"], target["id"],
                    target["guard"], target["soak"], flat_bonus=flat, surge=surge)
     state["surge"] = False
     if not info["hit"]:
@@ -376,31 +473,43 @@ def _delver_strike(state, rng):
     state["first_blood"] = True
     if killed:
         _ev(state, 1, "%s goes down." % target["id"])
-    elif "armored" in target["traits"] and target["soak"] > 0 and not surge:
-        target["soak"] = max(0, target["soak"] - (2 if info["crit"] else 1))
+    elif target["soak"] > 0 and not surge and (
+            "armored" in target["traits"] or d["relic"] == "hammer"):
+        # the tuning hammer finds the note anything is holding, armor or not
+        if d["relic"] == "hammer":
+            strip = 3 if info["crit"] else 1
+        else:
+            strip = 2 if info["crit"] else 1
+        target["soak"] = max(0, target["soak"] - strip)
         _ev(state, 1, "Armor gives where you worked it: %s is down to soak %d."
             % (target["id"], target["soak"]), "crack")
 
 
-def _enemy_strike(state, rng, enemy, free=False):
+def _enemy_strike(state, rng, enemy, atk_bonus=0):
     d = state["delver"]
     if enemy["hp"] <= 0 or d["hp"] <= 0:
         return
-    atk = enemy["atk"]
+    atk = enemy["atk"] + atk_bonus
     if "relentless" in enemy["traits"] and d["hp"] * 2 < d["hp_max"]:
         atk += 2
-    if state["round"] == 1 and "lurker" in enemy["traits"]:
-        atk += 4
+    if state["round"] == 1 and "lurker" in enemy["traits"] and not _ambush_suppressed(state):
+        atk += LURKER_AMBUSH_ATK
     if state["darkness"]:
         atk += 2
     info = _attack(state, rng, enemy["id"], atk, enemy["dmg"], "you", d["guard"], d["soak"])
     if not info["hit"]:
         _ev(state, 0, info["text"])
         return
-    # resolve the grit auto-spend before logging, so the blow's own line can
-    # say whether it was the one that finished you
+    # resolve the mirror and the grit auto-spend before logging, so the blow's
+    # own line can say whether it was the one that finished you
     dmg = info["dmg"]
     halved = []
+    mirrored = None
+    if d["relic"] == "mirror" and not state["mirror_used"]:
+        state["mirror_used"] = True
+        dmg = dmg // 2
+        mirrored = ("The patient mirror was already there: the first blow of the fight "
+                    "lands halved, at %d." % dmg)
     while dmg >= d["hp"] and d["grit"] > 0:
         d["grit"] -= 1
         dmg = dmg // 2
@@ -411,6 +520,8 @@ def _enemy_strike(state, rng, enemy, free=False):
     _ev(state, 1 if info["crit"] else 0, info["text"],
         _hit_beat(state, info, d["hp_max"], killed, by_delver=False))
     state["first_blood"] = True
+    if mirrored:
+        _ev(state, 1, mirrored)
     for line in halved:
         _ev(state, 1, line, "close-call")
     d["worst_blow"] = max(d["worst_blow"], dmg)
@@ -424,6 +535,8 @@ def _enemy_strike(state, rng, enemy, free=False):
 def _burn_light(state):
     """The light clock: rounds cost lamp oil, so tempo is a real currency."""
     d = state["delver"]
+    if d["relic"] == "still_lamp":  # it burns nothing, which is the whole point
+        return
     if d["light"] <= 0:  # a fight that began in the dark burns nothing
         return
     d["light"] -= 1
@@ -445,6 +558,7 @@ def _finish(state, outcome):
         "worst_blow": d["worst_blow"],
         "rounds": state["round"],
         "kills": [e["id"] for e in state["enemies"] if e["hp"] <= 0],
+        "kit_used": list(state["kit_used"]),
         "events": state["events"],
         "menace_defeated": sum(e["menace"] for e in state["enemies"] if e["hp"] <= 0),
     }
@@ -453,13 +567,40 @@ def _finish(state, outcome):
     return None, result
 
 
+def _pursuit(enemy, prepared, roped=False):
+    """What leaving costs you, per living enemy: (strikes, attack bonus).
+
+    What is chasing you decides the price. A lurker does not chase -- it
+    waits for the next one through. A prepared exit (skirmish) means you
+    mapped the way out: everyone gets one blow at you, and nothing more. A
+    shard-hook rope takes the speed out of the fast ones the same way.
+    """
+    if "lurker" in enemy["traits"]:
+        return 0, 0
+    if prepared:
+        return 1, 0
+    strikes = 2 if ("swift" in enemy["traits"] and not roped) else 1
+    return strikes, RELENTLESS_PURSUIT_ATK if "relentless" in enemy["traits"] else 0
+
+
 def _withdraw(state, rng):
+    d = state["delver"]
+    prepared = state["stance"] == "skirmish"
     _ev(state, 1, "You break away; parting blows come.")
+    roped = "rope" in d["kit"]
+    if roped:
+        _spend_kit(state, "rope",
+                   "The shard-hook is already set where you meant to leave: you go up the "
+                   "rope and out, and the lamp never notices.")
+    if d["light"] > 0 and not roped:  # a fight in the dark has no lamp left to spend
+        d["light"] = max(0, d["light"] - WITHDRAW_LIGHT_COST)
+        _ev(state, 1, "You spend lamp and breath getting clear: -%d light."
+            % WITHDRAW_LIGHT_COST)
     for enemy in list(_living(state)):
-        strikes = 2 if "swift" in enemy["traits"] else 1
+        strikes, bonus = _pursuit(enemy, prepared, roped)
         for _ in range(strikes):
-            _enemy_strike(state, rng, enemy)
-    if state["delver"]["hp"] <= 0:
+            _enemy_strike(state, rng, enemy, atk_bonus=bonus)
+    if d["hp"] <= 0:
         return _finish(state, "down")
     return _finish(state, "retreated")
 
@@ -577,6 +718,7 @@ def main():
         "weapon": {"name": "salvage axe", "dmg": "1d10", "acc": -1},
         "armor": {"name": "quilted coat", "guard": 1, "soak": 1},
         "hp": 14, "grit": 3, "light": 10, "marks": [],
+        "kit": [], "relic": None, "stances": sorted(STANCES),
     }
     hound = {"name": "glasshound", "hp": 6, "atk": 3, "guard": 12, "soak": 0,
              "dmg": "1d6", "traits": ["swift"], "menace": 2}

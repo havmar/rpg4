@@ -17,9 +17,20 @@ def stock_delver(**over):
         "armor": {"name": "quilted delver's coat", "guard": 1, "soak": 1},
         "hp": 14, "grit": 3,
         "light": 10, "supply": 3, "salvage": [], "marks": [], "alive": True,
+        # a bench delver knows every stance and carries nothing it did not buy
+        "kit": [], "relic": None, "stances": sorted(engine.STANCES),
     }
     d.update(over)
     return d
+
+
+def with_kit(*effects, **over):
+    return stock_delver(kit=[{"name": e, "effect": e, "value": 1, "text": "t"} for e in effects],
+                        **over)
+
+
+def wearing(effect, **over):
+    return stock_delver(relic={"name": effect, "effect": effect, "value": 1, "text": "t"}, **over)
 
 
 HOUND = {"name": "glasshound", "hp": 6, "atk": 3, "guard": 12, "soak": 0,
@@ -331,6 +342,139 @@ class TestBeats(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(r["events"])), r["events"])
 
 
+# --------------------------------------------------------- plan 0005 pieces
+# Harmless pursuers, so the price of leaving is measured and not survived:
+# a wall can only touch you on a natural 20, and then only for 1.
+PARTING_RE = re.compile(r"^(\S+) (hits|misses) you \((\d+)([+-]\d+) vs (\d+)\)")
+
+# vim 6 puts the pause line (60%) well clear of the relentless in-fight
+# clause (half hp), so a parting-strike bonus is the only thing measured.
+TOUGH = {"edge": 2, "iron": 2, "vim": 6, "nerve": 2, "craft": 2}
+
+
+def pursuer(name, traits):
+    return wall(name=name, traits=list(traits), hp=400)
+
+
+def parting(result):
+    """(attacker, attack modifier) for every blow struck after the break."""
+    out, leaving = [], False
+    for _, text, _ in result["events"]:
+        if text.startswith("You break away"):
+            leaving = True
+        elif leaving:
+            m = PARTING_RE.match(text)
+            if m:
+                out.append((m.group(1), int(m.group(4))))
+    return out
+
+
+class TestTheCostOfLeaving(unittest.TestCase):
+    """Pursuit: what is chasing you decides what leaving costs."""
+
+    def leave(self, enemies, stance="measure", seed=1, darkness=False, **over):
+        """Pause at round 2 with hp to spare, then pull out."""
+        d = stock_delver(stats=dict(TOUGH), hp=15, **over)
+        state, result = engine.start_fight(d, enemies, stance, seed, darkness=darkness)
+        self.assertIsNone(result, "expected a pause, got %r" % (result and result["outcome"]))
+        r = engine.resume_fight(state, "withdraw")
+        self.assertEqual(r["outcome"], "retreated")
+        self.assertGreaterEqual(r["hp"] * 2, engine.hp_max(d),
+                                "the harmless pursuers did real damage; the fixture is wrong")
+        return r
+
+    def strikes(self, result):
+        counts = {}
+        for who, _ in parting(result):
+            counts[who] = counts.get(who, 0) + 1
+        return counts
+
+    def test_the_pursuit_table(self):
+        r = self.leave([pursuer("lurker", ["lurker"]), pursuer("swift", ["swift"]),
+                        pursuer("plain", [])])
+        # the lurker does not chase: it waits for the next one through
+        self.assertEqual(self.strikes(r), {"swift#1": 2, "plain#1": 1})
+
+    def test_relentless_parting_blows_come_at_a_bonus(self):
+        plain = self.leave([pursuer("plain", [])])
+        chase = self.leave([pursuer("plain", ["relentless"])])
+        self.assertEqual([mod for _, mod in parting(plain)], [-30])
+        self.assertEqual([mod for _, mod in parting(chase)],
+                         [-30 + engine.RELENTLESS_PURSUIT_ATK])
+
+    def test_a_swift_relentless_thing_gets_both(self):
+        r = self.leave([pursuer("hunter", ["swift", "relentless"])])
+        self.assertEqual([mod for _, mod in parting(r)], [-28, -28])
+
+    def test_the_prepared_exit_caps_every_pursuer_at_one(self):
+        enemies = [pursuer("lurker", ["lurker"]), pursuer("swift", ["swift"]),
+                   pursuer("hunter", ["relentless"])]
+        r = self.leave(enemies, stance="skirmish")
+        self.assertEqual(self.strikes(r), {"swift#1": 1, "hunter#1": 1})
+        self.assertEqual({mod for _, mod in parting(r)}, {-30})  # and no pursuit bonus
+
+    def test_a_room_of_lurkers_lets_you_walk_out_of_any_stance(self):
+        for stance in sorted(engine.STANCES):
+            r = self.leave([pursuer("waiting", ["lurker"]), pursuer("patient", ["lurker"])],
+                           stance=stance)
+            self.assertEqual(parting(r), [], stance)
+
+    def test_leaving_costs_one_light(self):
+        r = self.leave([pursuer("plain", [])], light=10)
+        self.assertEqual(r["light"], 10 - engine.WITHDRAW_LIGHT_COST)
+        self.assertEqual(len(texts(r, "You spend lamp and breath getting clear")), 1)
+
+    def test_a_fight_that_started_dark_has_no_lamp_left_to_spend(self):
+        r = self.leave([pursuer("plain", [])], light=0, darkness=True)
+        self.assertEqual(r["light"], 0)
+        self.assertEqual(texts(r, "You spend lamp and breath getting clear"), [])
+
+    def test_the_stalemate_valve_pays_the_same_prices(self):
+        d = stock_delver(hp=200, light=200, weapon={"name": "shiv", "dmg": "1d2", "acc": 0})
+        state, result = engine.start_fight(d, [wall(hp=4000)], "measure", 3)
+        self.assertIsNone(state, "the valve must end the fight, not pause it")
+        self.assertEqual(result["outcome"], "retreated")
+        self.assertEqual(result["rounds"], 50)
+        self.assertEqual(len(parting(result)), 1)
+        self.assertEqual(result["light"],
+                         200 - 50 // engine.LIGHT_CLOCK_ROUNDS - engine.WITHDRAW_LIGHT_COST)
+
+
+class TestThePreparedExit(unittest.TestCase):
+    """Skirmish keeps the exit and pays for it with attack."""
+
+    def test_the_skirmish_tuple(self):
+        self.assertEqual(engine.STANCES["skirmish"], (-2, 1, 0, 0))
+
+    def test_the_combatant_build_carries_it(self):
+        d = stock_delver()
+        c = engine._combatant_from_delver(d, "skirmish", False)
+        self.assertEqual(c["atk"], engine.attack_bonus(d) - 2)
+        self.assertEqual(c["guard"], engine.guard(d) + 1)
+        self.assertEqual(c["soak"], engine.soak(d))
+        self.assertEqual(c["dmg_bonus"], 0)
+
+    def test_switching_into_skirmish_moves_attack_by_two(self):
+        seed, state = TestFight().find_pausing_seed()  # stance: measure
+        before = state["delver"]["atk"]
+        engine._switch_stance(state, "skirmish")
+        self.assertEqual(state["delver"]["atk"], before - 2)
+        self.assertEqual(state["delver"]["guard"], engine.guard(stock_delver()) + 1)
+
+    def test_the_auto_flee_still_fires_at_the_flee_line(self):
+        # hp tracks the constant: just under the flee line, wherever it is set
+        under = int(engine.SKIRMISH_FLEE_FRAC * engine.hp_max(stock_delver()))
+        below = run_to_end(stock_delver(hp=under), [wall(hp=400)], "skirmish", 1)
+        self.assertEqual(below["outcome"], "retreated")
+        self.assertEqual(below["rounds"], 1)
+        self.assertTrue(texts(below, "this is the moment you planned to leave"))
+
+    def test_above_the_flee_line_it_pauses_instead(self):
+        state, result = engine.start_fight(stock_delver(hp=8), [wall(hp=400)], "skirmish", 1)
+        self.assertIsNone(result)
+        self.assertEqual(state["delver"]["hp"], 8)  # nothing crossed the line
+
+
 class TestMarkEffects(unittest.TestCase):
     def marked(self, effect):
         return stock_delver(marks=[{"name": "test mark", "effect": effect, "text": "t"}])
@@ -371,6 +515,240 @@ class TestMarkEffects(unittest.TestCase):
         mods_a = {int(HIT_RE.match(t).group(3)) for t in texts(a, "You ") if HIT_RE.match(t)}
         mods_b = {int(HIT_RE.match(t).group(3)) for t in texts(b, "You ") if HIT_RE.match(t)}
         self.assertEqual(mods_b, {m - 1 for m in mods_a})
+
+
+# --------------------------------------------------------- plan 0006 pieces
+DREAD_RE = re.compile(r"^(?:Something here is wrong|Fear gets its hook in).* vs (\d+)\)\.$")
+
+
+def lurker_wall():
+    """A thing that waits. Harmless except for what round 1 hands it."""
+    return wall(name="waiter", traits=["lurker"], hp=400)
+
+
+def enemy_mods(result, prefix):
+    """Every attack modifier an enemy struck with, in order."""
+    out = []
+    for _, text, _ in result["events"]:
+        m = PARTING_RE.match(text)
+        if m and m.group(1).startswith(prefix):
+            out.append(int(m.group(4)))
+    return out
+
+
+def my_mods_by_round(result):
+    """(round, attack modifier) for every swing you took."""
+    out, cur = [], 0
+    for _, text, _ in result["events"]:
+        if text.startswith("-- round "):
+            cur = int(text.split()[2])
+        m = HIT_RE.match(text)
+        if m:
+            out.append((cur, int(m.group(3))))
+    return out
+
+
+def dread_dc(result):
+    for _, text, _ in result["events"]:
+        m = DREAD_RE.match(text)
+        if m:
+            return int(m.group(1))
+    raise AssertionError("no dread test in this fight")
+
+
+class TestTheLearnedStances(unittest.TestCase):
+    """Two stances bought with chits: the anti-ambush commit, and the one
+    that buys accuracy with the clock."""
+
+    def long_fight(self, delver, stance, seed=3):
+        state, result = engine.start_fight(delver, [wall(hp=400)], stance, seed)
+        self.assertIsNotNone(result, "the wall should never pause the fight")
+        return result
+
+    def test_the_tuples(self):
+        self.assertEqual(engine.STANCES["brace"], (-1, 2, 2, 0))
+        self.assertEqual(engine.STANCES["read"], (-2, 1, 0, 0))
+        self.assertEqual(sorted(engine.BASE_STANCES),
+                         sorted(s for s in engine.STANCES if s not in ("brace", "read")))
+
+    def test_brace_carries_its_tuple_onto_the_combatant(self):
+        d = stock_delver()
+        c = engine._combatant_from_delver(d, "brace", False)
+        self.assertEqual((c["atk"], c["guard"], c["soak"], c["dmg_bonus"]),
+                         (engine.attack_bonus(d) - 1, engine.guard(d) + 2, engine.soak(d) + 2, 0))
+
+    def test_a_lurker_gets_no_ambush_on_a_braced_delver(self):
+        plain = run_to_end(stock_delver(hp=200, light=200), [lurker_wall()], "measure", 3)
+        braced = run_to_end(stock_delver(hp=200, light=200), [lurker_wall()], "brace", 3)
+        self.assertEqual(enemy_mods(plain, "waiter")[0], -30 + engine.LURKER_AMBUSH_ATK)
+        self.assertEqual(enemy_mods(braced, "waiter")[0], -30)
+        self.assertEqual(set(enemy_mods(braced, "waiter")), {-30})
+
+    def test_read_strikes_at_plus_five_from_round_three_and_not_before(self):
+        base = engine.attack_bonus(stock_delver())
+        plain = self.long_fight(stock_delver(hp=200, light=200), "measure")
+        reading = self.long_fight(stock_delver(hp=200, light=200), "read")
+        self.assertEqual({mod for _, mod in my_mods_by_round(plain)}, {base})
+        early = {mod for rnd, mod in my_mods_by_round(reading) if rnd < engine.READ_ROUND}
+        late = {mod for rnd, mod in my_mods_by_round(reading) if rnd >= engine.READ_ROUND}
+        self.assertEqual(early, {base - 2})
+        self.assertEqual(late, {base - 2 + engine.READ_ATK_BONUS})
+        self.assertEqual(len(texts(reading, "You have their pattern")), 1)
+
+    def test_the_pattern_line_never_comes_up_in_a_short_read(self):
+        short = run_to_end(stock_delver(), [wall(hp=1, soak=0)], "read", 2)
+        self.assertEqual(texts(short, "You have their pattern"), [])
+
+    def test_read_is_stateless_across_a_pause_switch_both_ways(self):
+        seed, state = TestFight().find_pausing_seed()  # paused in measure
+        state["round"] = engine.READ_ROUND + 2
+        self.assertEqual(engine._read_bonus(state), 0)
+        engine._switch_stance(state, "read")
+        self.assertEqual(engine._read_bonus(state), engine.READ_ATK_BONUS)
+        engine._switch_stance(state, "measure")
+        self.assertEqual(engine._read_bonus(state), 0)
+        state["round"] = engine.READ_ROUND - 1  # ... and it is the round that decides
+        engine._switch_stance(state, "read")
+        self.assertEqual(engine._read_bonus(state), 0)
+
+    def test_the_pause_offers_only_stances_this_delver_knows(self):
+        seed, state = TestFight().find_pausing_seed()
+        state["delver"]["stances"] = ["measure", "ward"]
+        opts = engine.pause_options(state)
+        self.assertIn("ward", opts)
+        for stance in ("brace", "read", "press", "skirmish"):
+            self.assertNotIn(stance, opts)
+        with self.assertRaises(ValueError):
+            engine.resume_fight(state, "brace")
+
+
+class TestKitInTheFight(unittest.TestCase):
+    """Kit is insurance bought at the surface; the fight spends it for you."""
+
+    def leave(self, enemies, stance="measure", seed=1, **over):
+        """Pause at round 2 with hp to spare, then pull out."""
+        d = stock_delver(stats=dict(TOUGH), hp=15, **over)
+        state, result = engine.start_fight(d, enemies, stance, seed)
+        self.assertIsNone(result, "expected a pause, got %r" % (result and result["outcome"]))
+        r = engine.resume_fight(state, "withdraw")
+        self.assertEqual(r["outcome"], "retreated")
+        return r
+
+    def strikes(self, result):
+        counts = {}
+        for who, _ in parting(result):
+            counts[who] = counts.get(who, 0) + 1
+        return counts
+
+    def test_flash_powder_takes_the_ambush_and_is_gone(self):
+        r = run_to_end(with_kit("flash", hp=200, light=200), [lurker_wall()], "measure", 3)
+        self.assertEqual(enemy_mods(r, "waiter")[0], -30)
+        self.assertEqual(r["kit_used"], ["flash"])
+        self.assertEqual(len(texts(r, "flash powder")), 1)
+
+    def test_flash_powder_is_not_spent_where_nothing_is_waiting(self):
+        r = run_to_end(with_kit("flash", hp=200, light=200), [wall(hp=400)], "measure", 3)
+        self.assertEqual(r["kit_used"], [])
+        self.assertEqual(texts(r, "flash powder"), [])
+
+    def test_without_the_powder_the_ambush_lands(self):
+        r = run_to_end(stock_delver(hp=200, light=200), [lurker_wall()], "measure", 3)
+        self.assertEqual(enemy_mods(r, "waiter")[0], -30 + engine.LURKER_AMBUSH_ATK)
+        self.assertEqual(r["kit_used"], [])
+
+    def test_the_rope_pays_the_lights_share_and_slows_the_swift(self):
+        enemies = [pursuer("swift", ["swift"]), pursuer("plain", [])]
+        plain = self.leave(enemies, light=10)
+        roped = self.leave(enemies, light=10, kit=[{"name": "shard-hook rope", "effect": "rope",
+                                                    "value": 9, "text": "t"}])
+        self.assertEqual(self.strikes(plain), {"swift#1": 2, "plain#1": 1})
+        self.assertEqual(plain["light"], 10 - engine.WITHDRAW_LIGHT_COST)
+        self.assertEqual(self.strikes(roped), {"swift#1": 1, "plain#1": 1})
+        self.assertEqual(roped["light"], 10)
+        self.assertEqual(roped["kit_used"], ["rope"])
+
+    def test_the_rope_leaves_a_relentless_pursuer_its_bonus(self):
+        r = self.leave([pursuer("hunter", ["relentless"])], light=10,
+                       kit=[{"name": "shard-hook rope", "effect": "rope", "value": 9, "text": "t"}])
+        self.assertEqual([mod for _, mod in parting(r)], [-30 + engine.RELENTLESS_PURSUIT_ATK])
+
+    def test_the_rope_and_the_prepared_exit_do_not_stack_into_anything_odd(self):
+        enemies = [pursuer("swift", ["swift"]), pursuer("hunter", ["relentless"])]
+        r = self.leave(enemies, stance="skirmish", light=10,
+                       kit=[{"name": "shard-hook rope", "effect": "rope", "value": 9, "text": "t"}])
+        self.assertEqual(self.strikes(r), {"swift#1": 1, "hunter#1": 1})
+        self.assertEqual({mod for _, mod in parting(r)}, {-30})
+        self.assertEqual(r["light"], 10)  # skirmish caps the strikes; the rope refunds the lamp
+
+    def test_kit_you_do_not_hold_does_nothing(self):
+        r = self.leave([pursuer("swift", ["swift"])], light=10)
+        self.assertEqual(r["light"], 10 - engine.WITHDRAW_LIGHT_COST)
+        self.assertEqual(r["kit_used"], [])
+
+
+class TestRelicsInTheFight(unittest.TestCase):
+    """One slot, worn until you die, and every one of them an exception."""
+
+    def test_the_hammer_cracks_the_unarmored(self):
+        target = wall(soak=3, hp=400)  # no `armored` trait: nothing else would crack it
+        plain = run_to_end(stock_delver(hp=200), [target], "measure", 4)
+        hammered = run_to_end(wearing("hammer", hp=200), [target], "measure", 4)
+        self.assertEqual(texts(plain, "Armor gives"), [])
+        soaks = [int(CRACK_RE.match(t).group(1)) for t in texts(hammered, "Armor gives")]
+        self.assertEqual(soaks, [2, 1, 0])
+
+    def test_a_hammer_crit_strips_three(self):
+        for seed in range(60):
+            r = run_to_end(wearing("hammer", hp=200), [wall(soak=9, hp=800)], "measure", seed)
+            soak, crit_pending, seen = 9, False, False
+            for _, text, _ in r["events"]:
+                m = CRACK_RE.match(text)
+                if m:
+                    self.assertEqual(int(m.group(1)), max(0, soak - (3 if crit_pending else 1)))
+                    soak = int(m.group(1))
+                    seen = seen or crit_pending
+                crit_pending = "CRIT!" in text and text.startswith("You hit")
+            if seen:
+                return
+        self.fail("no crit landed on a soaking target in 60 seeds")
+
+    def test_the_still_lamp_never_burns_a_round_and_costs_you_two_light(self):
+        d = wearing("still_lamp", hp=200, light=10, weapon={"name": "shiv", "dmg": "1d4", "acc": 0})
+        state, r = engine.start_fight(d, [wall(hp=12, soak=0)], "measure", 2)
+        self.assertIsNone(state)
+        self.assertEqual(r["outcome"], "victory")  # no withdraw: the lamp is the only cost here
+        self.assertGreater(r["rounds"], engine.LIGHT_CLOCK_ROUNDS)
+        self.assertEqual(r["light"], 10)
+        self.assertEqual([b for b in beats(r) if b in ("lamp-low", "lamp-out")], [])
+        self.assertEqual(engine.light_max(wearing("still_lamp")), engine.light_max(stock_delver()) - 2)
+
+    def test_the_mirror_halves_the_first_landed_hit_and_no_other(self):
+        puncher = wall(name="puncher", atk=30, dmg="1d6", hp=60)
+        plain = run_to_end(stock_delver(hp=400, grit=0, light=400), [puncher], "measure", 6)
+        mirrored = run_to_end(wearing("mirror", hp=400, grit=0, light=400), [puncher], "measure", 6)
+        first = int(re.match(r"^puncher#1 hits you for (\d+)", texts(plain, "hits you for")[0]).group(1))
+        lines = texts(mirrored, "patient mirror")
+        self.assertEqual(len(lines), 1)
+        self.assertIn("at %d." % (first // 2), lines[0])
+        self.assertEqual(mirrored["hp"] - plain["hp"], first - first // 2)
+
+    def test_the_bell_stops_the_waiting_and_eases_the_dread(self):
+        r = run_to_end(wearing("bell", hp=200, light=200), [lurker_wall()], "measure", 3)
+        self.assertEqual(enemy_mods(r, "waiter")[0], -30)
+        plain = run_to_end(stock_delver(), [BRUTE], "measure", 7)
+        belled = run_to_end(wearing("bell"), [BRUTE], "measure", 7)
+        self.assertEqual(dread_dc(plain), 10 + 2 * BRUTE["dread"])
+        self.assertEqual(dread_dc(belled), 10 + 2 * (BRUTE["dread"] - 1))
+
+    def test_the_seal_winds_the_drum_one_further(self):
+        self.assertEqual(engine.windings_max(wearing("seal")),
+                         engine.windings_max(stock_delver()) + 1)
+
+    def test_an_unknown_relic_effect_is_not_a_reading(self):
+        with self.assertRaises(ValueError):
+            engine.has_relic(stock_delver(), "invulnerability")
+        with self.assertRaises(ValueError):
+            engine.has_kit(stock_delver(), "a bigger sword")
 
 
 if __name__ == "__main__":

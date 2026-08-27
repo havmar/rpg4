@@ -69,6 +69,13 @@ def write_delver(save):
                                                           d["armor"]["soak"],
                                                           " [heavy]" if d["armor"].get("heavy") else ""))
     lines.append("  knack:  %s -- %s" % (d["knack"], d["knack_text"]))
+    lines.append("  kit:    " + (", ".join(k["name"] for k in d["kit"]) if d["kit"]
+                                 else "nothing bought"))
+    if d["relic"]:
+        lines.append("  relic:  %s -- %s" % (d["relic"]["name"], d["relic"]["text"]))
+    learned = sorted(s for s in d["stances"] if s not in engine.BASE_STANCES)
+    if learned:
+        lines.append("  learned stances: " + ", ".join(learned))
     lines.append("")
     if d["marks"]:
         lines.append("  MARKS (camp dresses the newest; a day in the haven clears them all)")
@@ -87,6 +94,12 @@ def write_delver(save):
         lines.append("  carrying (%d/%d):" % (len(d["salvage"]), engine.satchel_cap(d)))
         for item in d["salvage"]:
             lines.append("    - %s (worth %d)" % (item["name"], item["value"]))
+    if save["stashes"]:
+        lines.append("  cached below (yours only if you go back for it): "
+                     + "; ".join("depth %d: %d items worth %d"
+                                 % (r["depth"], len(r["items"]),
+                                    sum(i["value"] for i in r["items"]))
+                                 for r in save["stashes"]))
     lines.append("")
     _write(save, "delver.txt", "\n".join(lines) + "\n")
 
@@ -99,10 +112,13 @@ def write_map(save):
         lines.append("   |   <-- you are here, at the threshold")
     # roads not taken, in the order they were declined
     unopened = list(exp["declined"]) if exp["active"] else []
+    cached = {r["depth"]: len(r["items"]) for r in save["stashes"]}
     for site in exp["sites"] if exp["active"] else []:
         marker = "   <-- you are here" if site["depth"] == exp["depth"] and site is exp["sites"][-1] else ""
         lines.append("   |")
         lines.append("  d%-2d %-12s %s%s" % (site["depth"], "[" + site["kind"] + "]", site["name"], marker))
+        if site["depth"] in cached:  # once per depth, at its first room
+            lines.append("      ..stash: %d items" % cached.pop(site["depth"]))
         while unopened and unopened[0]["depth"] == site["depth"]:
             lines.append("      ..unopened: %s" % unopened.pop(0)["rumor"])
     if exp["active"] and exp["fork"]:

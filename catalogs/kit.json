@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "kit": [
+    {"name": "oil flask", "value": 6, "effect": "oil",
+     "text": "A hand's weight of rendered oil under a wax stopper. Three more hours of seeing."},
+    {"name": "dressing roll", "value": 8, "effect": "dressing",
+     "text": "Boiled linen wound tight around a surgeon's short, unsentimental instructions."},
+    {"name": "flash powder", "value": 10, "effect": "flash",
+     "text": "A twist of paper that turns a dark room white. Whatever was waiting is merely present."},
+    {"name": "shard-hook rope", "value": 9, "effect": "rope",
+     "text": "Forty feet of line and a glass hook that bites where you set it and lets go when asked."},
+    {"name": "tithe of oilbread", "value": 7, "effect": "oilbread",
+     "text": "Dense, sweet, faintly of the lamp. One loaf is a night you do not have to pay for."},
+    {"name": "drum key", "value": 12, "effect": "drumkey",
+     "text": "A borrowed winding-key. The assay-house has decided not to notice these walking off."}
+  ]
+}

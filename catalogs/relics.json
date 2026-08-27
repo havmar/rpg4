@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "relics": [
+    {"name": "the tuning hammer", "value": 30, "effect": "hammer",
+     "text": "It finds the note a thing is holding. Struck often enough, most things stop holding it."},
+    {"name": "the still lamp", "value": 25, "effect": "still_lamp",
+     "text": "It consumes nothing and it never gutters. It never burns bright, either: you see less, for longer."},
+    {"name": "the patient mirror", "value": 35, "effect": "mirror",
+     "text": "It shows the room half a breath early. The first blow of any fight arrives to a body already moving."},
+    {"name": "the pilgrim's bell", "value": 25, "effect": "bell",
+     "text": "Too small to hear. The things that wait in the dark hear it, and stop waiting."},
+    {"name": "the assayer's seal", "value": 40, "effect": "seal",
+     "text": "A brass thumbprint of an epoch that kept immaculate books. Any broker's hand goes honest around it."}
+  ]
+}

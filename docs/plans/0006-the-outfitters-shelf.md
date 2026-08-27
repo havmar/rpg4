@@ -1,6 +1,6 @@
 # Plan 0006 — The outfitter's shelf: kit, relics, and stances worth learning
 
-Status: READY (implement after 0005; its exit prices and career
+Status: DONE (implemented after 0005; its exit prices and career
 tournament are assumed throughout)
 
 ## Sources
@@ -197,12 +197,12 @@ delver). No migration.
 
 ## Checklist
 
-- [ ] catalogs/kit.json + relics.json; content validation, censuses 6 + 5
-- [ ] engine.py: brace/read, kit/relic effect hooks, effect id sets, v6
-- [ ] content.py: relic roll, buy/use/equip/learn, hooks, stance gate
-- [ ] session.py commands + market/status; pages.py sheet lines
-- [ ] bench_policy.py: six-stance table + shopping policies
-- [ ] contract suites green (`python -m unittest`)
-- [ ] benches re-run; BENCHLOG entry vs targets
-- [ ] PLAYBOOK kit/relic paragraph
-- [ ] CLAUDE.md status updated
+- [x] catalogs/kit.json + relics.json; content validation, censuses 6 + 5
+- [x] engine.py: brace/read, kit/relic effect hooks, effect id sets, v6
+- [x] content.py: relic roll, buy/use/equip/learn, hooks, stance gate
+- [x] session.py commands + market/status; pages.py sheet lines
+- [x] bench_policy.py: six-stance table + shopping policies
+- [x] contract suites green (`python -m unittest`)
+- [x] benches re-run; BENCHLOG entry vs targets
+- [x] PLAYBOOK kit/relic paragraph
+- [x] CLAUDE.md status updated
