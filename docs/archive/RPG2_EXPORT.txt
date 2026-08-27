@@ -1,0 +1,227 @@
+RPG2 — INFRASTRUCTURE EXPORT (verbatim, as pasted by the designer 2026-08-23)
+=============================================================================
+Provenance document. UNDERSTORY's live conventions are in docs/ENGINE.md and
+docs/PLAYBOOK.md; where they differ from this file, they win. Kept verbatim so
+the reasoning behind adapted rules can be traced.
+
+RPG2 — INFRASTRUCTURE EXPORT
+============================
+An export of the project's infrastructural and process conventions, for
+bootstrapping a new game with different settings and mechanics. This file
+deliberately contains NO fiction/writing style, or
+display-format rules — only the machinery around the game: how it is run,
+stored, documented, tested, and developed.
+
+1. THE CORE ARCHITECTURE: AGENT + SCRIPT LIBRARY, NO GAME LOOP
+--------------------------------------------------------------
+- The game is TWO HALVES working together:
+  * Python scripts are a LIBRARY of mechanics primitives and content
+    (combat resolvers, rest, world/quest/character generators, catalogs).
+    They own all the numbers.
+  * The coding agent (as DM/game-runner) calls those primitives ON
+    PURPOSE, in whatever order the story wants, and narrates over the
+    result. There is deliberately NO autopilot for pacing — nothing in
+    code forces a day to end; the agent decides when to call things like
+    `long_rest`. This preserves tabletop-style freedom. Some calls can be
+    automated later; for now they are manual on purpose.
+- PART OF THE GAME LIVES IN INSTRUCTIONS TO THE AGENT, not in code. The
+  engine will never encode every situation; judgement calls, improvised
+  scenes, and when-to-call-which-function live in the DM playbook and the
+  agent's reasoning. When a rule of play is settled that isn't a pure
+  number, it is written into the playbook doc rather than forced into the
+  engine.
+- The AI's advantage is reframed: not that it narrates, but that it is
+  the coding agent RUNNING the game — subsystems called on purpose,
+  content generated where needed, coherence kept by the agent, no central
+  game loop required.
+- Fights resolve on their own (autocombat, at most one mid-fight pause)
+  and produce an outcome plus a log; the player's real decisions happen
+  BETWEEN fights — and at the pause. The engine owns the numbers.
+
+2. THE SESSION DRIVER AND SAVE MODEL
+------------------------------------
+- One thin CLI driver (`session.py`) sits over the engine/content modules
+  and keeps ALL campaign state (party, clock, purse, world) in a single
+  `save.json` between invocations. The driver adds no game logic of its
+  own; `--help` lists every subcommand with its rules.
+- The save is PLAIN JSON on purpose, for two reasons:
+  * it is committable, so a playthrough worth keeping can travel with the
+    repo;
+  * it is hand-editable — editing the save between commands is the DM's
+    OVERRIDE SURFACE for things no command provides (grant money, mend a
+    wound, resurrect someone the fiction says survived). Every command
+    reloads the file fresh. The convention: use it for story reasons,
+    never to edit away an outcome you merely dislike.
+- `save.json` itself stays UNTRACKED by default. Saves are disposable
+  during development: never spend effort preserving or restoring them
+  while developing/tuning — start a new game, wreck the state with test
+  games, move on. A playthrough worth keeping is a named exception the
+  designer commits explicitly, not the default to protect.
+- Each module also exposes a small standalone eyeball check
+  (`python <module>.py --seed N ...` prints a sample) so content and
+  generators can be inspected without a full game.
+
+3. GITHUB AS THE PLAYER'S UI
+----------------------------
+- The player-facing UI is a set of standing pages in a `ui/` directory,
+  COMMITTED TO THE BRANCH, not gitignored: they are read as GitHub blob
+  pages by both player and DM. Only the save stays untracked.
+- Engine-written pages are rewritten on every save (party sheet, world
+  map page, campaign history). Combat writes two last-fight snapshots
+  (short displayed log + full every-roll detail); a new encounter
+  replaces them.
+- Two pages are DM-AUTHORED, never engine-written: the scene page (the
+  current DM message) and the append-only transcript. The engine never
+  touches them; the sheet command just commits them.
+- A single end-of-message command (`sheet`) commits every existing page —
+  ONE COMMIT PER MESSAGE, so the player can follow the playthrough as
+  message-sized diffs. Unchanged pages are a no-op; it runs anyway. Git
+  here is best-effort and never fatal to the game.
+- The chat message carries the turn's text; under it goes exactly ONE
+  link — the page the chat does NOT already contain (the party board):
+  https://github.com/<owner>/<repo>/blob/<branch>/ui/party.txt
+  The scene page's footer links lead to the rest (map, history). The
+  detailed fight log is shared on request.
+- Draft-review-commit-copy protocol: the DM message is written into the
+  scene page FIRST, reread and edited there, committed, and only then
+  copied into chat verbatim. The chat copy is a COPY, never a first
+  draft. If a fix occurs after posting: edit the page, commit again,
+  state the correction plainly — never let the two silently diverge.
+- The scene page holds only the CURRENT turn (rewritten whole each
+  message); the transcript is the append-only full record; the chat
+  scrollback is the lookback. `new` starts both files fresh — THE OLD
+  GAME LIVES ON IN ITS OWN BRANCH (one playthrough per branch).
+- The history page doubles as the DM's continuity reference across
+  sessions: what the party did, who they killed, what they are known for.
+
+4. NO BACKWARDS COMPATIBILITY — EVER (designer directive)
+---------------------------------------------------------
+The project has exactly ONE player: the designer. The loop is playtest
+until something big surfaces, change the game, START A NEW GAME. So:
+- Save compatibility is NEVER a design input. No migration shims, lazy
+  upgrades, or missing-key fallbacks whose only purpose is loading an old
+  save. When a better key name or state shape wins, take it and let old
+  saves break.
+- Old-save round-trip tests are historical caution, not a standing
+  requirement: delete them (and any lazy-upgrade branch they cover)
+  whenever touching their files; never add new ones.
+- Optimize for the good game. If a change is better for play and breaks
+  every existing save, it is simply better. Same spirit inside the
+  codebase: refactor freely — the test suites and benches are the safety
+  net, not frozen interfaces.
+- COROLLARY — never soften a reader for a state the code cannot produce.
+  The same reflex shows up with no save in sight: a getter returning a
+  neutral 1.0 / 0 / empty list when a record it depends on is missing. If
+  the constructor always builds that record, the missing case is a BUG,
+  and a neutral answer makes it invisible. Let it raise. The tell: the
+  fallback's only caller is a test. A test that needs the system in a
+  state the game never builds should build a LEGAL state instead.
+  Optional AUTHORED fields are different and fine: reading a declared-
+  optional schema key with a default is reading a schema, not tolerating
+  damage.
+
+5. THE DOCUMENT SYSTEM (who owns what)
+--------------------------------------
+to be created no, no bias
+
+...
+
+7. SESSION-START PROTOCOL (every agent session)
+-----------------------------------------------
+- Before reading or changing project state: `git status --short
+  --branch`. If the tree is clean, fast-forward with `git pull
+  --ff-only`; if dirty, preserve and understand the local work before
+  pulling. Never assume the checked-out copy already contains the latest
+  changes.
+- Settle the session MODE first (the dispatcher's job): playing/testing a
+  game loads the play docs and NOTHING from the dev docs governs the
+  table; developing REQUIRES the dev guide before changing the game —
+  never start a dev task from the dispatcher alone.
+
+8. TESTING AND MEASUREMENT INFRASTRUCTURE
+-----------------------------------------
+- CONTRACT SUITES: each shipped system gets a plain-unittest contract
+  suite (test_<system>.py) describing the MODEL, not the sessions that
+  built it — run with `python -m unittest -v test_x.py`. Suites pin
+  measured distributions, determinism (same seed → same world), save
+  round-trips, display-page invariants, and deliberately-unreachable
+  content. A standard trick: ONE BROKEN WORLD PER VALIDATOR CLAUSE — for
+  every lint the world validator enforces, a test builds a world that
+  violates exactly that clause and asserts rejection.
+- SELF-VALIDATING WORLDGEN: the world/content constructors call their own
+  validators on every build (`validate_world` after worldgen,
+  `validate_catalog` on catalog load, import-time validation of record
+  constructors). Authored-content censuses are PINNED as constants the
+  validator checks, so silent content drift fails loudly.
+- BENCH SUITES: standalone bench_*.py scripts measure outcome
+  distributions (clear/wipe rates, economy flow, worldgen censuses,
+  career sims) over many seeds. After every change that could move
+  numbers, re-run and append a dated entry to the bench log — even (and
+  especially) "nothing moved, byte-identical" entries, because they are
+  the proof a change is bench-neutral.
+- A tuning-sweep tool (tune.py) does the outcome-distribution sweep +
+  resource-pressure check in one run.
+- TUNING PRINCIPLE (transferable): the sims understate the player. Batch
+  policies use fixed schedules and crude thresholds; a real player paces
+  and times. So sim clear rates run BELOW played clear rates, and harsher
+  sim numbers than "feels fair" are acceptable — tune for the felt game.
+- Tests and benches are the safety net that makes the no-backcompat
+  refactor-freely rule safe.
+
+9. CODE CONVENTIONS
+-------------------
+- Stdlib only. The engine module stays self-contained and importable
+  (everything else imports it); a separate content module holds the
+  catalogs so the engine stays generic.
+- Determinism everywhere: stable derived child seeds (BLAKE2 off parent
+  identity), seeded rng carried in the save, derived rolls keyed off a
+  record's OWN identity so the answer is the same whenever it is asked
+  and survives the save. Pathfinding and any tie-breaking use explicit
+  deterministic ordering (no hash order anywhere).
+- Prefer recomputing readers over stored state: read surfaces store
+  nothing and roll nothing — every answer recomputed from what worldgen
+  stamped. New stored fields are rare and called out as such.
+- Entity/identity: combat entities use identity hashing (dataclass
+  eq=False) because they live in sets; don't switch to value equality.
+- Windows note: use PYTHONIOENCODING=utf-8 when piping output (cp1250
+  default); keep runtime output ASCII-safe for portability.
+- Authored content files (JSON catalogs) are versioned with a version
+  number the validator checks first, and obsolete schema keys are
+  actively REJECTED so the old shape cannot creep back.
+- Content locality rule: nothing in a shared/generic catalog may name a
+  specific position or neighbour — a template's description must be true
+  everywhere its fit-tags admit it. Fixed geography and name pools live
+  in code beside the map that owns them.
+
+10. WORKING WITH THE DESIGNER (dev-session process)
+---------------------------------------------------
+- The user is the game's designer and only audience. He built the
+  systems; supply the fine mechanical detail (exact modifiers, formulas,
+  tuned constants) — don't re-explain his own design back to him.
+- No reflexive commentary ("working as designed" filler) in dev/test
+  sessions. When the design intends something, just show it happening.
+- Real feedback is wanted — ACTIVELY. Say when something feels weird,
+  non-optimal, or frictful from the co-designer chair; point out obvious
+  problems and low-hanging fruit proactively instead of waiting to be
+  asked.
+- When transcribing the designer's chat notes into docs, REWRITE them
+  into clean prose; never paste raw brainstorm wording into permanent
+  docs.
+- Dev communication is the place to be thorough: post-implementation
+  summaries, tuning reports, and design discussions should be genuinely
+  verbose — what changed, where, why, measured numbers before and after,
+  what was tried and rejected. An over-terse summary that forces
+  follow-up questions costs more than a long one.
+- Docs updated in the same commit as the change they describe; flag any
+  doc/code conflict noticed rather than leaving it.
+
+11. MULTI-AGENT PORTABILITY
+---------------------------
+- The auto-loaded dispatcher carries no agent's name in its body, so it
+  can be copied unchanged to another agent's instruction filename
+  (CLAUDE.md ↔ AGENTS.md etc.).
+- Recipe for a two-file arrangement (shared body + per-agent shim): keep
+  the text in a neutral file (AGENTS.md) and make each agent's file a
+  pointer/include shim. Note: folding a shim back into one file makes
+  git record delete+modify, not a rename — `git log --follow` will not
+  cross it; find the fold commit by logging the deleted path.

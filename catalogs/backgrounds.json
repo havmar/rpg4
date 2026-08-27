@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "backgrounds": [
+    {
+      "name": "lamplighter",
+      "blurb": "Kept the wick-roads of the upper dark. Knows how far oil goes.",
+      "priorities": ["nerve", "craft", "iron", "vim", "edge"],
+      "knack": "lamplighter",
+      "knack_text": "+2 maximum light",
+      "weapon": "lamplighter's pike",
+      "armor": "quilted delver's coat"
+    },
+    {
+      "name": "cutter",
+      "blurb": "Fought in somebody's war topside. The habits came home intact.",
+      "priorities": ["edge", "iron", "vim", "nerve", "craft"],
+      "knack": "cutter",
+      "knack_text": "+1 attack",
+      "weapon": "salvage axe",
+      "armor": "cullet-studded jack"
+    },
+    {
+      "name": "glasspicker",
+      "blurb": "Grew up sorting shard-middens barehanded. Fast eyes, faster fingers.",
+      "priorities": ["craft", "edge", "nerve", "vim", "iron"],
+      "knack": "glasspicker",
+      "knack_text": "+1 chit on every salvage item banked",
+      "weapon": "delver's knife",
+      "armor": "oilcloth wraps"
+    },
+    {
+      "name": "salvage-priest",
+      "blurb": "Ordained to speak the rites over what is brought up. Unafraid of most of it.",
+      "priorities": ["nerve", "vim", "iron", "craft", "edge"],
+      "knack": "salvage-priest",
+      "knack_text": "+2 on dread tests",
+      "weapon": "glass-backed maul",
+      "armor": "quilted delver's coat"
+    },
+    {
+      "name": "surgeons-runner",
+      "blurb": "Carried the bags and held the clamps. Knows what keeps a body going.",
+      "priorities": ["vim", "craft", "edge", "iron", "nerve"],
+      "knack": "surgeons-runner",
+      "knack_text": "+3 healing when camping",
+      "weapon": "delver's knife",
+      "armor": "quilted delver's coat"
+    },
+    {
+      "name": "archivist",
+      "blurb": "Catalogued recovered writings until the writings started answering.",
+      "priorities": ["craft", "nerve", "vim", "iron", "edge"],
+      "knack": "archivist",
+      "knack_text": "+1 maximum grit",
+      "weapon": "smoke pistol",
+      "armor": "oilcloth wraps"
+    }
+  ]
+}

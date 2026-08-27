@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "salvage": [
+    {"name": "fused coin-clutch", "value": 3, "depth": [1, 3],
+     "blurb": "Currency of the last day, melted into one honest lump."},
+    {"name": "vitric lens", "value": 4, "depth": [1, 4],
+     "blurb": "Shows things slightly closer than they are. Brokers pay for that."},
+    {"name": "unmelted ledger-clasp", "value": 5, "depth": [1, 4],
+     "blurb": "The book burned; the clasp kept its grip on nothing."},
+    {"name": "glass rose", "value": 6, "depth": [2, 5],
+     "blurb": "Grown, not made. The stem is still growing, very slowly."},
+    {"name": "tallow seal", "value": 7, "depth": [2, 5],
+     "blurb": "Stamped wax of a deeper epoch. Collectors get quiet around it."},
+    {"name": "watchman's eye", "value": 8, "depth": [3, 6],
+     "blurb": "Pried from a vitrified citizen. It has stopped watching. Probably."},
+    {"name": "annealed songbar", "value": 9, "depth": [3, 6],
+     "blurb": "Struck, it holds its note for an hour. The note is a word."},
+    {"name": "pane of true glass", "value": 10, "depth": [4, 6],
+     "blurb": "Shows what is actually there. Priced accordingly."},
+    {"name": "lattice relay bead", "value": 12, "depth": [4, 6],
+     "blurb": "Still warm. Still ticking. Somewhere, something notices it moving."},
+    {"name": "the small mirror that is warm", "value": 15, "depth": [5, 6],
+     "blurb": "The brokers keep a standing bounty and a standing rule: wrap it."}
+  ]
+}

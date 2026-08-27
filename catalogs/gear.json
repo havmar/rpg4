@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "weapons": [
+    {"name": "delver's knife", "dmg": "1d6+1", "acc": 1, "value": 8,
+     "blurb": "Short, quick, and honest about what it is for."},
+    {"name": "pick-hammer", "dmg": "1d8", "acc": 0, "value": 10,
+     "blurb": "Tool first, weapon second, argument-settler third."},
+    {"name": "lamplighter's pike", "dmg": "1d8+1", "acc": 0, "value": 12,
+     "blurb": "Reach enough to keep the wick between you and it."},
+    {"name": "salvage axe", "dmg": "1d10", "acc": -1, "value": 15,
+     "blurb": "Made for cutting things out of other things."},
+    {"name": "smoke pistol", "dmg": "2d4", "acc": 0, "value": 20,
+     "blurb": "Loud, slow to load, and deeply persuasive once."},
+    {"name": "glass-backed maul", "dmg": "2d6", "acc": -2, "value": 25,
+     "blurb": "A ritual instrument, repurposed. Or possibly the reverse."}
+  ],
+  "armors": [
+    {"name": "oilcloth wraps", "guard": 0, "soak": 0, "value": 5, "heavy": false,
+     "blurb": "Keeps the damp out. Keeps nothing else out."},
+    {"name": "quilted delver's coat", "guard": 1, "soak": 1, "value": 12, "heavy": false,
+     "blurb": "Standard issue for people who go down on purpose."},
+    {"name": "cullet-studded jack", "guard": 1, "soak": 2, "value": 20, "heavy": false,
+     "blurb": "Glass shard armor: the Understory turned back on itself."},
+    {"name": "salvaged plate harness", "guard": 2, "soak": 3, "value": 40, "heavy": true,
+     "blurb": "Pieces of several epochs' soldiers, none of whom needed them anymore."}
+  ]
+}

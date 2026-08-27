@@ -1,0 +1,14 @@
+THE DESCENT
+===========
+
+  WAKE  (the mouth)
+   |
+  d1  [strange]    a standing mirror
+   |
+  d2  [salvage]    collapsed stockroom
+      ..unopened: Quiet. Your own lamp is the loudest thing in it.
+      ..unopened: Quiet. Your own lamp is the loudest thing in it.
+   |
+  d3  [encounter]  vitrified street   <-- you are here
+      ..unopened: The floor hums, as if something swims through it.
+

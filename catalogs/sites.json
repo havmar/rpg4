@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "sites": [
+    {"name": "shatterfall scree", "kind": "encounter", "depth": [1, 2],
+     "text": "A slope of crushed glass in constant faint motion, loud underfoot."},
+    {"name": "vitrified street", "kind": "encounter", "depth": [1, 4],
+     "text": "A street preserved mid-morning: stalls, doorways, citizens of glass."},
+    {"name": "glass orchard", "kind": "encounter", "depth": [1, 3],
+     "text": "Rows of trees that were fruiting when the heat came. Some still are."},
+    {"name": "annealing hall", "kind": "encounter", "depth": [2, 5],
+     "text": "A vaulted workshop where the ovens have never fully cooled."},
+    {"name": "watchman's rotunda", "kind": "encounter", "depth": [2, 6],
+     "text": "A guard-round with sightlines in every direction, all of them yours to be seen from."},
+    {"name": "the kiln galleries", "kind": "encounter", "depth": [4, 6],
+     "text": "Chambers scoured smooth by the event itself. The walls have a flow direction."},
+    {"name": "collapsed stockroom", "kind": "salvage", "depth": [1, 4],
+     "text": "Shelving pancaked into strata of its own. Goods survive in the gaps."},
+    {"name": "glazier's crypt", "kind": "salvage", "depth": [3, 6],
+     "text": "Masters were interred with their best work. The work has kept better."},
+    {"name": "a standing mirror", "kind": "strange", "depth": [1, 6],
+     "text": "Full-length, unbroken, facing away from the door."},
+    {"name": "the murmur gallery", "kind": "strange", "depth": [2, 6],
+     "text": "A long room that repeats what it hears, not always promptly, not always accurately."},
+    {"name": "a cold hearth-round", "kind": "breather", "depth": [1, 6],
+     "text": "Old fire-ring, stacked shard-benches. Delvers have rested here for generations."},
+    {"name": "lantern niche", "kind": "breather", "depth": [1, 6],
+     "text": "A cut alcove with lamp-hooks and old wax. Defensible, quiet, almost kind."}
+  ]
+}

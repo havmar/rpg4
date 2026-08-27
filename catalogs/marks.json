@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "marks": [
+    {"name": "glass-stung hand", "effect": "atk-1",
+     "text": "A hundred small stings, none worth naming. The grip argues with you."},
+    {"name": "ringing ear", "effect": "nerve-2",
+     "text": "One clear note, held since. It is almost a pleasant note."},
+    {"name": "cracked rib", "effect": "hp_max-3",
+     "text": "It only hurts when the air comes in, which is often."},
+    {"name": "wrenched knee", "effect": "guard-1",
+     "text": "The leg still works. It has opinions about when."},
+    {"name": "split coat-seam", "effect": "soak-1",
+     "text": "The coat has opened a long grin down one side and will not close it."},
+    {"name": "lamp-shy", "effect": "light_leak",
+     "text": "The lamp learned a flicker somewhere back there and will not unlearn it."},
+    {"name": "shard in the boot", "effect": "flee_late",
+     "text": "Something small and patient, under the heel, arguing against running."},
+    {"name": "cold sweat", "effect": "grit_max-1",
+     "text": "It arrives a little before the fear does, which is the unnerving part."},
+    {"name": "bad night's blood", "effect": "camp_heal_half",
+     "text": "Sleep comes. The mending forgets to."},
+    {"name": "thousand-yard glaze", "effect": "breather_numb",
+     "text": "You are resting. You are looking at nothing. Neither is helping."}
+  ]
+}

@@ -1,0 +1,16 @@
+LAST FIGHT -- vitrified street (depth 3) -- DOWN
+================================================
+
+You hit shardswarm#1 for 6 (7+11 vs 10).  [first-blood]
+shardswarm#1 goes down.
+You are badly hurt (3/14).
+You hit shardswarm#2 for 6 (3+11 vs 10).  [finisher]
+shardswarm#2 goes down.
+You grit through it: damage halved to 2 (1 grit spent).  [close-call]
+You are badly hurt (1/14).
+You grit through it: damage halved to 1 (1 grit spent).  [close-call]
+You grit through it: damage halved to 0 (1 grit spent).  [close-call]
+You are badly hurt (1/14).
+shardswarm#5 hits you for 2 (13+2 vs 8).  [finisher]
+You are down.
+FIGHT ENDS after round 2: the dark takes you.

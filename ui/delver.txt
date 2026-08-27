@@ -1,0 +1,31 @@
+====================================================
+  Marek Culvert -- glasspicker of Wake  (DECEASED)
+====================================================
+
+  HP    [--------------------] 0/14
+  GRIT  [--------] 0/3
+  LIGHT [########----] 7/10
+  SUPPLY 3      WINDINGS 4/4
+  SATCHEL 2/7
+
+  EDGE 4  IRON 2  VIM 2  NERVE 2  CRAFT 3
+
+  EDGE   swing      (attack rolls)
+  IRON   stand      (guard)
+  VIM    endure     (hp)
+  NERVE  hold       (grit, fear)
+  CRAFT  provision  (satchel size, drum windings)
+  grit: luck you spend    light: time underground    supply: nights of camp
+
+  attack +9   guard 10   soak 0
+  weapon: delver's knife (1d6+1, acc +1)
+  armor:  oilcloth wraps (guard +0, soak 0)
+  knack:  glasspicker -- +1 chit on every salvage item banked
+
+  ON EXPEDITION -- depth 3
+  chits banked: 0
+  standing order: watchman's eye -- the assay-house pays +8 on the first one in
+  carrying (2/7):
+    - fused coin-clutch (worth 3)
+    - unmelted ledger-clasp (worth 5)
+
