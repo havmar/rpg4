@@ -5,6 +5,7 @@ driver adds no game logic of its own; rules live in engine.py and
 content.py, and the numbers live in the catalogs.
 
     python session.py new                    # roll a delver; day 1 starts underground
+    python session.py resume marek-culvert   # copy a run's committed save back in
     python session.py delve                  # one step deeper (or hear the fork)
     python session.py delve 2                 # take the second passage
     python session.py fight --stance press   # resolve the pending fight
@@ -12,12 +13,13 @@ content.py, and the numbers live in the catalogs.
     python session.py odds                   # wind the drum: odds on this fight
     python session.py camp | surface | status | market | log
     python session.py train edge | buy "salvage axe"
-    python session.py sheet -m "message"     # rewrite + commit ui/ pages
+    python session.py sheet -m "message"     # rewrite + commit + push run pages
 """
 
 import argparse
 import json
 import os
+import shutil
 import sys
 
 import content
@@ -66,6 +68,10 @@ def cmd_new(cat, args):
         raise SystemExit("save.json already exists; pass --force to abandon it")
     world_seed = args.seed if args.seed is not None else engine.child_seed(os.urandom(8).hex())
     save = content.new_save(cat, world_seed)
+    if os.path.isdir(pages.run_dir(save)):
+        raise SystemExit("the shelf already holds a run named %r -- Wake does not sign "
+                         "the same name twice; run new again for another stranger"
+                         % pages.run_slug(save))
     d = save["delver"]
     print("%s, %s.  (world seed %d)" % (d["name"], d["background"], world_seed))
     print(d["blurb"])
@@ -82,6 +88,28 @@ def cmd_new(cat, args):
     print("")
     _delve(cat, save)
     write_save(save)
+    print("")
+    print("run folder: runs/%s" % pages.run_slug(save))
+
+
+def cmd_resume(cat, args):
+    """Bring a shelved run back to the table: copy its committed save
+    snapshot into place as the live save.json. The version gate in
+    load_save is the permadeath-by-patch check -- if the engine moved on,
+    this refuses, and that delver's game is over (Ledger, then `new`)."""
+    src = os.path.join(pages.RUNS_DIR, args.run, "save.json")
+    if not os.path.exists(src):
+        runs = sorted(os.listdir(pages.RUNS_DIR)) if os.path.isdir(pages.RUNS_DIR) else []
+        have = [r for r in runs if os.path.exists(os.path.join(pages.RUNS_DIR, r, "save.json"))]
+        raise SystemExit("no committed save under runs/%s -- runs with saves: %s"
+                         % (args.run, ", ".join(have) if have else "none"))
+    if os.path.exists(SAVE_PATH) and not args.force:
+        raise SystemExit("a live save.json already exists; pass --force to replace it")
+    shutil.copyfile(src, SAVE_PATH)
+    save = load_save()
+    d = save["delver"]
+    print("%s the %s, resumed.%s" % (d["name"], d["background"],
+                                     "" if d["alive"] else "  (DEAD -- the Ledger remembers.)"))
 
 
 def cmd_status(cat, args):
@@ -246,6 +274,11 @@ def main(argv=None):
     s.add_argument("--force", action="store_true", help="abandon an existing save.json")
     s.set_defaults(fn=cmd_new)
 
+    s = sub.add_parser("resume", help="copy a run's committed save back into place (new session, same delver)")
+    s.add_argument("run", help="run folder name under runs/, e.g. marek-culvert")
+    s.add_argument("--force", action="store_true", help="replace an existing live save.json")
+    s.set_defaults(fn=cmd_resume)
+
     s = sub.add_parser("odds", help="wind the reckoning drum: simulated odds on this fight")
     s.add_argument("--n", type=int, default=2000, help="runs per line")
     s.set_defaults(fn=cmd_odds)
@@ -276,7 +309,7 @@ def main(argv=None):
     s.add_argument("item")
     s.set_defaults(fn=cmd_buy)
 
-    s = sub.add_parser("sheet", help="rewrite ui/ pages and commit them (one commit per message)")
+    s = sub.add_parser("sheet", help="rewrite the run's pages, commit, and push (one commit per message)")
     s.add_argument("-m", "--message", default=None)
     s.set_defaults(fn=cmd_sheet)
 

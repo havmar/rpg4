@@ -5,6 +5,12 @@ down under its charter; the Understory keeps its own copy, in its own way.
 Entries are appended, never rewritten. This file outlives saves, versions,
 and worlds (Charter §6) — everything else may be wiped; the Ledger endures.*
 
+*2026-08-27 — and it did. The repository was rebuilt from a flat copy after
+the old remote failed: every branch and all commit history before this date
+is lost. Marek Culvert's chronicle crossed with the copy (now
+`runs/marek-culvert/`); of Hallam Rasp and Teodor Slake, only the pages of
+this book survive.*
+
 ---
 
 ## Hallam Rasp — surgeon's-runner
