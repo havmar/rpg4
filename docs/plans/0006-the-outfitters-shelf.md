@@ -197,12 +197,12 @@ delver). No migration.
 
 ## Checklist
 
-- [ ] catalogs/kit.json + relics.json; content validation, censuses 6 + 5
-- [ ] engine.py: brace/read, kit/relic effect hooks, effect id sets, v6
-- [ ] content.py: relic roll, buy/use/equip/learn, hooks, stance gate
-- [ ] session.py commands + market/status; pages.py sheet lines
-- [ ] bench_policy.py: six-stance table + shopping policies
-- [ ] contract suites green (`python -m unittest`)
+- [x] catalogs/kit.json + relics.json; content validation, censuses 6 + 5
+- [x] engine.py: brace/read, kit/relic effect hooks, effect id sets, v6
+- [x] content.py: relic roll, buy/use/equip/learn, hooks, stance gate
+- [x] session.py commands + market/status; pages.py sheet lines
+- [x] bench_policy.py: six-stance table + shopping policies
+- [x] contract suites green (`python -m unittest`)
 - [ ] benches re-run; BENCHLOG entry vs targets
 - [ ] PLAYBOOK kit/relic paragraph
 - [ ] CLAUDE.md status updated

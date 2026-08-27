@@ -69,6 +69,13 @@ def write_delver(save):
                                                           d["armor"]["soak"],
                                                           " [heavy]" if d["armor"].get("heavy") else ""))
     lines.append("  knack:  %s -- %s" % (d["knack"], d["knack_text"]))
+    lines.append("  kit:    " + (", ".join(k["name"] for k in d["kit"]) if d["kit"]
+                                 else "nothing bought"))
+    if d["relic"]:
+        lines.append("  relic:  %s -- %s" % (d["relic"]["name"], d["relic"]["text"]))
+    learned = sorted(s for s in d["stances"] if s not in engine.BASE_STANCES)
+    if learned:
+        lines.append("  learned stances: " + ", ".join(learned))
     lines.append("")
     if d["marks"]:
         lines.append("  MARKS (camp dresses the newest; a day in the haven clears them all)")

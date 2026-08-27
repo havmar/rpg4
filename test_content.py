@@ -200,6 +200,46 @@ class TestBrokenWorlds(unittest.TestCase):
         c["backgrounds"][0]["weapon"] = "vorpal sword"
         self.assert_rejected(c)
 
+    def test_unknown_kit_effect(self):
+        c = cat()
+        c["kit"][0]["effect"] = "a second wind"
+        self.assert_rejected(c)
+
+    def test_duplicate_kit_name(self):
+        c = cat()
+        c["kit"][1]["name"] = c["kit"][0]["name"]
+        self.assert_rejected(c)
+
+    def test_kit_census_mismatch(self):
+        c = cat()
+        c["kit"].append(dict(c["kit"][0], name="a seventh comfort"))
+        self.assert_rejected(c)
+
+    def test_kit_locality_violation(self):
+        c = cat()
+        c["kit"][0]["text"] = "Pressed by the lamp-wrights of Wake."
+        self.assert_rejected(c)
+
+    def test_unknown_relic_effect(self):
+        c = cat()
+        c["relics"][0]["effect"] = "a third arm"
+        self.assert_rejected(c)
+
+    def test_duplicate_relic_name(self):
+        c = cat()
+        c["relics"][1]["name"] = c["relics"][0]["name"]
+        self.assert_rejected(c)
+
+    def test_relic_census_mismatch(self):
+        c = cat()
+        c["relics"].append(dict(c["relics"][0], name="the sixth wonder"))
+        self.assert_rejected(c)
+
+    def test_relic_locality_violation(self):
+        c = cat()
+        c["relics"][0]["text"] = "Only one broker in Wake will touch it."
+        self.assert_rejected(c)
+
 
 class TestGenerators(unittest.TestCase):
     def setUp(self):
@@ -309,7 +349,8 @@ class TestMarks(unittest.TestCase):
     def result(self, **over):
         d = self.save["delver"]
         r = {"outcome": "victory", "hp": engine.hp_max(d), "grit": 1, "light": 5,
-             "worst_blow": 0, "rounds": 3, "kills": [], "events": [], "menace_defeated": 1}
+             "worst_blow": 0, "rounds": 3, "kills": [], "kit_used": [], "events": [],
+             "menace_defeated": 1}
         r.update(over)
         return r
 
@@ -579,17 +620,16 @@ class TestStashes(unittest.TestCase):
         exp["depth"] = 4
         exp["pending_site"] = {"name": "a test hall", "enemies": ["glasshound"]}
         result = {"outcome": "retreated", "hp": 9, "grit": 1, "light": 3, "worst_blow": 0,
-                  "rounds": 4, "kills": [], "events": [], "menace_defeated": 0}
+                  "rounds": 4, "kills": [], "kit_used": [], "events": [], "menace_defeated": 0}
         content.apply_fight_result(self.cat, save, result)
         self.assertEqual(exp["depth"], 3)
         self.assertEqual(d["light"], 3)  # the withdraw's price lands on the delver
         self.assertEqual(self.values(), [6])
         self.assertEqual(save["stashes"], [])
 
-    def test_the_v5_save_shape_is_complete(self):
+    def test_the_save_shape_carries_the_stashes(self):
         cat, save = TestExpeditionFlow().fresh_save()
-        self.assertEqual(save["version"], 5)
-        self.assertEqual(engine.SAVE_VERSION, 5)
+        self.assertEqual(save["version"], engine.SAVE_VERSION)
         self.assertEqual(save["stashes"], [])
         self.assertEqual(json.loads(json.dumps(save)), save)
 
@@ -676,6 +716,32 @@ class TestTheCareerTournament(unittest.TestCase):
                          bench_policy.career_row("hedge", 3, 2))
         self.assertNotEqual(bench_policy.career_row("hedge", 3, 2),
                             bench_policy.career_row("committed", 3, 2))
+
+    def test_the_shopping_step_works_the_shelf(self):
+        import bench_policy
+        cat, save = TestExpeditionFlow().fresh_save(7)
+        save["wake"]["chits"] = 100
+        bench_policy.buy_kit(cat, save)
+        self.assertEqual([k["name"] for k in save["delver"]["kit"]],
+                         ["oil flask", "tithe of oilbread"])  # cheapest first, one of each
+        self.assertGreaterEqual(save["wake"]["chits"], bench_policy.SHOP_RESERVE)
+        poor = TestExpeditionFlow().fresh_save(7)[1]
+        poor["wake"]["chits"] = 5
+        bench_policy.buy_kit(cat, poor)
+        self.assertEqual(poor["delver"]["kit"], [])
+
+    def test_the_shopping_step_wears_the_first_relic_only(self):
+        import bench_policy
+        cat, save = TestExpeditionFlow().fresh_save(7)
+        save["expedition"].update({"active": True, "depth": 4})
+        d = save["delver"]
+        for name in ("the still lamp", "the tuning hammer"):
+            rec = content.by_name(cat["relics"], name)
+            d["salvage"].append({"name": rec["name"], "value": rec["value"]})
+        self.assertTrue(bench_policy.wear_first_relic(cat, save))
+        self.assertEqual(d["relic"]["name"], "the still lamp")
+        self.assertFalse(bench_policy.wear_first_relic(cat, save))
+        self.assertEqual([i["name"] for i in d["salvage"]], ["the tuning hammer"])
 
     def test_the_informed_sims_cannot_peek_at_the_waiting_fight(self):
         import bench_policy
@@ -1116,6 +1182,471 @@ class TestForks(unittest.TestCase):
                 pages.RUNS_DIR = old
         for entry in save["expedition"]["declined"]:
             self.assertIn("..unopened: %s" % entry["rumor"], text)
+
+
+class TestTheShelf(unittest.TestCase):
+    """Kit: bought at the counter, declared at purchase, spent by the world."""
+
+    def setUp(self):
+        self.cat, self.save = TestExpeditionFlow().fresh_save()
+        self.save["wake"]["chits"] = 100
+        self.d = self.save["delver"]
+
+    def held(self):
+        return [k["name"] for k in self.d["kit"]]
+
+    def underground(self):
+        self.save["expedition"].update({"active": True, "depth": 2})
+
+    def test_a_fresh_delver_carries_nothing_and_knows_the_four(self):
+        self.assertEqual(self.d["kit"], [])
+        self.assertIsNone(self.d["relic"])
+        self.assertEqual(self.d["stances"], list(engine.BASE_STANCES))
+
+    def test_buying_kit_takes_the_chits_and_hands_you_the_thing(self):
+        lines = content.do_buy(self.cat, self.save, "oil flask")
+        self.assertEqual(self.held(), ["oil flask"])
+        self.assertEqual(self.save["wake"]["chits"], 100 - 6)
+        self.assertTrue(any("oil flask" in line for line in lines))
+
+    def test_two_pieces_of_kit_and_no_more(self):
+        content.do_buy(self.cat, self.save, "oil flask")
+        content.do_buy(self.cat, self.save, "drum key")
+        chits = self.save["wake"]["chits"]
+        with self.assertRaises(ValueError):
+            content.do_buy(self.cat, self.save, "dressing roll")
+        self.assertEqual(len(self.d["kit"]), content.KIT_CAP)
+        self.assertEqual(self.save["wake"]["chits"], chits)  # a refusal costs nothing
+
+    def test_one_of_each(self):
+        content.do_buy(self.cat, self.save, "oil flask")
+        with self.assertRaises(ValueError):
+            content.do_buy(self.cat, self.save, "oil flask")
+        self.assertEqual(self.held(), ["oil flask"])
+
+    def test_the_outfitters_are_in_the_haven(self):
+        self.underground()
+        with self.assertRaises(ValueError):
+            content.do_buy(self.cat, self.save, "oil flask")
+
+    def test_the_flask_is_three_more_hours_of_seeing(self):
+        content.do_buy(self.cat, self.save, "oil flask")
+        self.underground()
+        light = self.d["light"]
+        content.do_use(self.save, "oil flask")
+        self.assertEqual(self.d["light"], light + content.OIL_FLASK_LIGHT)
+        self.assertEqual(self.held(), [])
+
+    def test_the_drum_key_winds_the_drum(self):
+        content.do_buy(self.cat, self.save, "drum key")
+        self.underground()
+        windings = self.d["windings"]
+        content.do_use(self.save, "drum key")
+        self.assertEqual(self.d["windings"], windings + content.DRUM_KEY_WINDINGS)
+        self.assertEqual(self.held(), [])
+
+    def test_you_cannot_use_what_you_are_not_carrying(self):
+        self.underground()
+        with self.assertRaises(ValueError):
+            content.do_use(self.save, "oil flask")
+        with self.assertRaises(ValueError):
+            content.do_use(self.save, "a third lung")
+
+    def test_you_cannot_use_kit_in_the_haven(self):
+        content.do_buy(self.cat, self.save, "oil flask")
+        with self.assertRaises(ValueError):
+            content.do_use(self.save, "oil flask")
+        self.assertEqual(self.held(), ["oil flask"])
+
+    def test_kit_that_fires_itself_is_not_a_verb(self):
+        content.do_buy(self.cat, self.save, "flash powder")
+        self.underground()
+        with self.assertRaises(ValueError):
+            content.do_use(self.save, "flash powder")
+        self.assertEqual(self.held(), ["flash powder"])
+
+    def test_kit_and_relic_and_stances_survive_the_climb(self):
+        content.do_buy(self.cat, self.save, "oil flask")
+        content.do_learn(self.save, "brace")
+        self.d["relic"] = dict(content.by_name(self.cat["relics"], "the pilgrim's bell"))
+        self.underground()
+        content.do_surface(self.cat, self.save)
+        self.assertEqual(self.held(), ["oil flask"])
+        self.assertEqual(self.d["relic"]["name"], "the pilgrim's bell")
+        self.assertIn("brace", self.d["stances"])
+
+
+class TestKitTriggers(unittest.TestCase):
+    """Every trigger fires on its own condition, consumes the item, and does
+    nothing at all when the item is not held."""
+
+    def setUp(self):
+        self.cat, self.save = TestExpeditionFlow().fresh_save()
+        self.save["expedition"].update({"active": True, "depth": 2,
+                                        "pending_site": {"name": "a test hall",
+                                                         "enemies": ["glasshound"]}})
+        self.d = self.save["delver"]
+
+    def give(self, name):
+        self.d["kit"].append(dict(content.by_name(self.cat["kit"], name)))
+
+    def result(self, **over):
+        d = self.d
+        r = {"outcome": "victory", "hp": engine.hp_max(d), "grit": 1, "light": 5,
+             "worst_blow": 0, "rounds": 3, "kills": [], "kit_used": [], "events": [],
+             "menace_defeated": 1}
+        r.update(over)
+        return r
+
+    def test_the_dressing_roll_opens_when_you_come_out_low(self):
+        self.give("dressing roll")
+        self.d["hp"] = engine.hp_max(self.d) // content.DRESSING_HP_FRAC
+        low = self.d["hp"]
+        lines = content.open_dressing(self.save, self.result(hp=low))
+        self.assertTrue(lines)
+        self.assertGreater(self.d["hp"], low)
+        self.assertLessEqual(self.d["hp"] - low, 6)
+        self.assertEqual(self.d["kit"], [])
+
+    def test_the_dressing_roll_stays_rolled_when_you_walk_out_fine(self):
+        self.give("dressing roll")
+        self.d["hp"] = engine.hp_max(self.d)
+        self.assertEqual(content.open_dressing(self.save, self.result()), [])
+        self.assertEqual(len(self.d["kit"]), 1)
+
+    def test_the_dressing_roll_is_no_use_to_the_dead(self):
+        self.give("dressing roll")
+        self.d["hp"] = 0
+        self.d["alive"] = False
+        self.assertEqual(content.open_dressing(self.save, self.result(outcome="down", hp=0)), [])
+        self.assertEqual(len(self.d["kit"]), 1)
+
+    def test_no_dressing_roll_no_bandage(self):
+        self.d["hp"] = 1
+        self.assertEqual(content.open_dressing(self.save, self.result(hp=1)), [])
+
+    def test_what_the_fight_spent_leaves_the_satchel(self):
+        self.give("flash powder")
+        self.give("shard-hook rope")
+        content.apply_fight_result(self.cat, self.save,
+                                   self.result(outcome="retreated", kit_used=["flash"]))
+        self.assertEqual([k["name"] for k in self.d["kit"]], ["shard-hook rope"])
+
+    def test_the_tithe_pays_for_a_night_the_stores_cannot(self):
+        self.save["expedition"]["pending_site"] = None
+        self.give("tithe of oilbread")
+        self.d["supply"] = 0
+        self.d["hp"] = 1
+        light = self.d["light"]
+        lines = content.do_camp(self.cat, self.save)
+        self.assertEqual(self.d["supply"], 0)
+        self.assertEqual(self.d["light"], light - 1)  # light is paid as normal
+        self.assertEqual(self.d["kit"], [])
+        self.assertGreater(self.d["hp"], 1)
+        self.assertTrue(any("oilbread" in line for line in lines))
+
+    def test_without_the_tithe_an_empty_larder_is_an_empty_larder(self):
+        self.save["expedition"]["pending_site"] = None
+        self.d["supply"] = 0
+        with self.assertRaises(ValueError):
+            content.do_camp(self.cat, self.save)
+
+    def test_the_tithe_is_still_only_one_night(self):
+        self.save["expedition"]["pending_site"] = None
+        self.give("tithe of oilbread")
+        self.d["supply"] = 1
+        self.d["hp"] = 1
+        content.do_camp(self.cat, self.save)
+        self.assertEqual(self.d["supply"], 1)  # the loaf went first
+        self.d["hp"] = 1
+        content.do_camp(self.cat, self.save)
+        self.assertEqual(self.d["supply"], 0)
+
+
+class TestRelicsFound(unittest.TestCase):
+    """Salvage that refuses to be money, found where salvage is the point."""
+
+    def setUp(self):
+        self.cat, self.save = TestExpeditionFlow().fresh_save()
+        self.save["expedition"].update({"active": True, "depth": 3})
+        self.d = self.save["delver"]
+        self.d["salvage"] = []
+
+    def site(self, depth, names, kind="salvage", **over):
+        s = {"depth": depth, "kind": kind, "name": "a shelf of drawers",
+             "text": "drawers", "salvage": list(names), "rumor": "corners"}
+        s.update(over)
+        return s
+
+    def enter(self, site):
+        self.save["expedition"]["depth"] = max(1, site["depth"] - 1)
+        return content._enter_site(self.cat, self.save, site, [])
+
+    def carried(self):
+        return [i["name"] for i in self.d["salvage"]]
+
+    def test_the_roll_is_deep_only_and_rare_and_reaches_every_relic(self):
+        seen = set()
+        for depth in range(1, content.DEPTH_MAX + 1):
+            found = [content.roll_relic(self.cat, depth, engine.rng_for("relic", depth, i))
+                     for i in range(1500)]
+            found = [r for r in found if r]
+            if depth < content.RELIC_MIN_DEPTH:
+                self.assertEqual(found, [], depth)
+                continue
+            rate = len(found) / 1500.0
+            self.assertTrue(0.09 <= rate <= 0.15, (depth, rate))
+            seen.update(r["name"] for r in found)
+        self.assertEqual(seen, {r["name"] for r in self.cat["relics"]})
+
+    def find_relic_counter(self, depth, names, start=0):
+        """The first save counter at which this floor holds a relic."""
+        for counter in range(start, start + 400):
+            probe = json.loads(json.dumps(self.save))
+            probe["counter"] = counter
+            probe["delver"]["salvage"] = []
+            probe["expedition"]["depth"] = max(1, depth - 1)
+            content._enter_site(self.cat, probe, self.site(depth, names), [])
+            if any(content.is_relic(self.cat, i["name"]) for i in probe["delver"]["salvage"]):
+                return counter
+        self.fail("no relic in 400 seeded floors at depth %d" % depth)
+
+    def test_a_deep_salvage_floor_holds_a_relic_instead_of_its_first_find(self):
+        names = ["watchman's eye", "annealed songbar"]
+        self.save["counter"] = self.find_relic_counter(5, names)
+        _, lines = self.enter(self.site(5, names))
+        carried = self.carried()
+        self.assertEqual(len(carried), 2)
+        self.assertTrue(content.is_relic(self.cat, carried[0]))
+        self.assertEqual(carried[1], "annealed songbar")  # only the FIRST find is displaced
+        self.assertNotIn("watchman's eye", carried)
+        self.assertTrue(any("This is not salvage" in line for line in lines))
+
+    def test_the_easy_galleries_hold_none(self):
+        for depth in (1, 2):
+            for counter in range(300):
+                self.save["counter"] = counter
+                self.d["salvage"] = []
+                self.enter(self.site(depth, ["vitric lens"]))
+                self.assertEqual(self.carried(), ["vitric lens"])
+
+    def test_a_strange_room_never_hands_you_one(self):
+        entry = content.by_name(self.cat["strange"], "a delver's cache")
+        for counter in range(300):
+            self.save["counter"] = counter
+            self.d["salvage"] = []
+            self.enter(self.site(6, ["pane of true glass"], kind="strange",
+                                 strange=entry["name"], effect=entry["effect"],
+                                 strange_text=entry["text"]))
+            for name in self.carried():
+                self.assertFalse(content.is_relic(self.cat, name), name)
+
+    def test_victory_loot_never_holds_one(self):
+        exp = self.save["expedition"]
+        exp["pending_site"] = {"name": "a test hall", "enemies": ["glasshound"]}
+        for counter in range(200):
+            self.save["counter"] = counter
+            self.d["salvage"] = []
+            self.d["alive"] = True
+            exp["pending_site"] = {"name": "a test hall", "enemies": ["glasshound"]}
+            content.apply_fight_result(self.cat, self.save, {
+                "outcome": "victory", "hp": 10, "grit": 1, "light": 5, "worst_blow": 0,
+                "rounds": 3, "kills": ["glasshound#1"], "kit_used": [], "events": [],
+                "menace_defeated": 2})
+            for name in self.carried():
+                self.assertFalse(content.is_relic(self.cat, name), name)
+
+
+class TestWearingARelic(unittest.TestCase):
+    """One slot, no unequip, and the old one does not survive the new one."""
+
+    def setUp(self):
+        self.cat, self.save = TestExpeditionFlow().fresh_save()
+        self.save["expedition"].update({"active": True, "depth": 4})
+        self.d = self.save["delver"]
+        self.d["salvage"] = []
+
+    def carry(self, name):
+        rec = content.by_name(self.cat["relics"], name)
+        self.d["salvage"].append({"name": rec["name"], "value": rec["value"]})
+        return rec
+
+    def test_equipping_moves_it_out_of_the_satchel(self):
+        rec = self.carry("the pilgrim's bell")
+        content.do_equip(self.cat, self.save, rec["name"])
+        self.assertEqual(self.d["salvage"], [])
+        self.assertEqual(self.d["relic"], dict(rec))
+
+    def test_equipping_over_one_destroys_it(self):
+        self.carry("the pilgrim's bell")
+        content.do_equip(self.cat, self.save, "the pilgrim's bell")
+        self.carry("the tuning hammer")
+        lines = content.do_equip(self.cat, self.save, "the tuning hammer")
+        self.assertEqual(self.d["relic"]["name"], "the tuning hammer")
+        self.assertEqual(self.d["salvage"], [])
+        self.assertTrue(any("pilgrim's bell" in line for line in lines))
+
+    def test_you_can_only_wear_what_you_carry(self):
+        with self.assertRaises(ValueError):
+            content.do_equip(self.cat, self.save, "the still lamp")
+        with self.assertRaises(ValueError):
+            content.do_equip(self.cat, self.save, "vitric lens")
+
+    def test_not_with_something_watching_you_and_not_in_a_doorway(self):
+        exp = self.save["expedition"]
+        self.carry("the still lamp")
+        exp["pending_site"] = {"name": "a hall", "enemies": ["glasshound"]}
+        with self.assertRaises(ValueError):
+            content.do_equip(self.cat, self.save, "the still lamp")
+        exp["pending_site"] = None
+        exp["paused_fight"] = {"delver": {"hp": 3}}
+        with self.assertRaises(ValueError):
+            content.do_equip(self.cat, self.save, "the still lamp")
+        exp["paused_fight"] = None
+        exp["fork"] = [{"depth": 5, "rumor": "quiet"}]
+        with self.assertRaises(ValueError):
+            content.do_equip(self.cat, self.save, "the still lamp")
+        exp["fork"] = None
+        content.do_equip(self.cat, self.save, "the still lamp")  # ... and then it works
+
+    def test_an_unworn_relic_banks_for_its_value(self):
+        rec = self.carry("the assayer's seal")
+        self.save["wake"]["commission"] = {"item": "nothing anyone posted", "bonus": 0}
+        self.d["knack"] = "cutter"  # keep the glasspicker bonus out of the sum
+        content.do_surface(self.cat, self.save)
+        self.assertEqual(self.save["wake"]["chits"], rec["value"])
+        self.assertIsNone(self.d["relic"])
+
+    def test_a_worn_relic_comes_up_with_you(self):
+        self.carry("the tuning hammer")
+        content.do_equip(self.cat, self.save, "the tuning hammer")
+        content.do_surface(self.cat, self.save)
+        self.assertEqual(self.d["relic"]["name"], "the tuning hammer")
+        self.assertEqual(self.save["wake"]["chits"], 0)
+
+    def test_the_still_lamp_shortens_the_clock_you_are_holding(self):
+        self.d["light"] = engine.light_max(self.d)
+        full = self.d["light"]
+        self.carry("the still lamp")
+        content.do_equip(self.cat, self.save, "the still lamp")
+        self.assertEqual(engine.light_max(self.d), full - 2)
+        self.assertEqual(self.d["light"], full - 2)
+
+    def test_the_seal_triples_exactly_one_unit_and_winds_the_drum(self):
+        item = content.by_name(self.cat["salvage"], self.save["wake"]["commission"]["item"])
+        self.d["knack"] = "cutter"
+        self.d["salvage"] = [{"name": item["name"], "value": item["value"]} for _ in range(2)]
+        self.carry("the assayer's seal")
+        seal = content.by_name(self.cat["relics"], "the assayer's seal")
+        content.do_equip(self.cat, self.save, seal["name"])
+        content.do_surface(self.cat, self.save)
+        # two units carried: one pays triple, the other pays the list price
+        self.assertEqual(self.save["wake"]["chits"], 4 * item["value"])
+        self.assertEqual(self.d["windings"], engine.windings_max(self.d))
+        self.assertEqual(self.d["windings"], 1 + self.d["stats"]["craft"] + 1)
+
+
+class TestLearningAStance(unittest.TestCase):
+    """Bought knowledge: chits, not stat gates."""
+
+    def setUp(self):
+        self.cat, self.save = TestExpeditionFlow().fresh_save()
+        self.d = self.save["delver"]
+
+    def test_the_haven_teaches_two_stances(self):
+        self.assertEqual(sorted(content.LEARNABLE_STANCES), ["brace", "read"])
+        for stance in content.LEARNABLE_STANCES:
+            self.assertIn(stance, engine.STANCES)
+            self.assertIn(stance, content.STANCE_TEXT)
+
+    def test_learning_costs_chits_and_lasts(self):
+        self.save["wake"]["chits"] = content.STANCE_COST + 1
+        content.do_learn(self.save, "read")
+        self.assertIn("read", self.d["stances"])
+        self.assertEqual(self.save["wake"]["chits"], 1)
+        with self.assertRaises(ValueError):
+            content.do_learn(self.save, "read")
+
+    def test_short_of_chits_is_short_of_a_stance(self):
+        self.save["wake"]["chits"] = content.STANCE_COST - 1
+        with self.assertRaises(ValueError):
+            content.do_learn(self.save, "brace")
+        self.assertNotIn("brace", self.d["stances"])
+
+    def test_you_learn_it_above_ground(self):
+        self.save["wake"]["chits"] = 100
+        self.save["expedition"]["active"] = True
+        with self.assertRaises(ValueError):
+            content.do_learn(self.save, "brace")
+
+    def test_nobody_teaches_what_is_not_on_offer(self):
+        self.save["wake"]["chits"] = 100
+        for stance in ("measure", "flying kick"):
+            with self.assertRaises(ValueError):
+                content.do_learn(self.save, stance)
+
+    def test_a_fight_refuses_a_stance_you_have_not_learned(self):
+        exp = self.save["expedition"]
+        exp.update({"active": True, "depth": 2,
+                    "pending_site": {"name": "a test hall", "enemies": ["glasshound"]}})
+        with self.assertRaises(ValueError):
+            content.start_pending_fight(self.cat, self.save, "brace")
+        self.save["wake"]["chits"] = 100
+        self.save["expedition"]["active"] = False
+        content.do_learn(self.save, "brace")
+        self.save["expedition"]["active"] = True
+        content.start_pending_fight(self.cat, self.save, "brace")  # ... and now it does not
+
+    def test_the_pause_offers_only_what_you_know(self):
+        save = self.save
+        exp = save["expedition"]
+        for _ in range(80):
+            if exp["pending_site"] and exp["pending_site"].get("enemies"):
+                paused, _ = content.start_pending_fight(self.cat, save, "measure")
+                if paused:
+                    break
+                if not save["delver"]["alive"]:
+                    self.fail("died before a pause")
+                exp["depth"] = 1
+                continue
+            _delve_through(self.cat, save)
+        else:
+            self.fail("no pause in 80 delves")
+        opts = set(engine.pause_options(exp["paused_fight"]))
+        self.assertEqual(opts & set(engine.STANCES), set(engine.BASE_STANCES) - {"measure"})
+
+    def test_the_drum_answers_about_lines_you_can_take(self):
+        save = self.save
+        exp = save["expedition"]
+        for _ in range(60):
+            _delve_through(self.cat, save)
+            if exp["pending_site"] and exp["pending_site"].get("enemies"):
+                break
+            exp["depth"] = 1
+        else:
+            self.fail("no encounter in 60 delves")
+        save["delver"]["windings"] = 5
+        labels = {r["label"].split(" / ")[0] for r in content.simulate_odds(self.cat, save, 3)}
+        self.assertEqual(labels, set(engine.BASE_STANCES))
+
+    def test_the_v6_save_shape_is_complete(self):
+        cat, save = TestExpeditionFlow().fresh_save()
+        d = save["delver"]
+        self.assertEqual(save["version"], 6)
+        self.assertEqual(engine.SAVE_VERSION, 6)
+        self.assertEqual(d["kit"], [])
+        self.assertIsNone(d["relic"])
+        self.assertEqual(d["stances"], list(engine.BASE_STANCES))
+        self.assertEqual(json.loads(json.dumps(save)), save)
+
+    def test_a_delver_who_cannot_hold_kit_is_a_bug_not_a_case(self):
+        """No migration, ever: the shapes below cannot be produced, so the
+        readers raise instead of pretending."""
+        for key in ("kit", "relic", "stances"):
+            broken = json.loads(json.dumps(self.save))["delver"]
+            del broken[key]
+            with self.assertRaises(KeyError):
+                engine._combatant_from_delver(broken, "measure", False)
 
 
 if __name__ == "__main__":
