@@ -91,6 +91,14 @@ Plan 0004 is DONE (save v4): at most depths the way down splits, and each
 passage is announced only by a rumor derived from what is actually behind
 it — a passage holding nothing but lurkers sounds exactly like a place to
 rest. The unchosen ways close behind you; the map remembers them.
+Plan 0005 is DONE (save v5): leaving a fight has a price — pursuit is paid
+per trait (lurkers do not chase, swift things strike twice, relentless
+ones strike harder), every withdraw burns a lamp, and skirmish buys its
+prepared exit with attack; `session.py stash` converts satchel weight into
+value waiting at a depth, recovered automatically when you come back for
+it. The career policy tournament (`bench_policy.py --careers`) landed with
+it and immediately reported the honest result: the exit hedge is priced
+but not beaten (BENCHLOG 2026-08-27).
 
 All three plans from the 2026-08-25 design session have landed. Session 3
 (Marek Culvert, ledgered) was played on a stale checkout — the 2026-08-23
@@ -100,7 +108,8 @@ The 2026-08-26 design session wrote `docs/MECHANICS.md` (the mechanical
 north star), landed `bench_policy.py` (the policy-tournament bench the
 plan-0002 benchlog caveat asked for; it confirmed the skirmish hedge
 survives 0002–0004 untouched), and produced plans
-`0005-the-cost-of-leaving` and `0006-the-outfitters-shelf`, both READY.
+`0005-the-cost-of-leaving` (now DONE) and `0006-the-outfitters-shelf`
+(READY).
 
 **2026-08-27 — infrastructure loss and recovery.** The original remote
 became unusable (sessions kept checking out the first historical commit;
@@ -118,5 +127,5 @@ the old remote. One remnant to clean by hand: the remote branch
 `zz-push-policy-probe` (a push-policy test; deleting refs from a session
 is blocked).
 
-Next milestone: implement 0005 then 0006, then a playthrough on the
-resulting engine (save v6). Update this status as milestones land.
+Next milestone: implement 0006, then a playthrough on the resulting
+engine (save v6). Update this status as milestones land.

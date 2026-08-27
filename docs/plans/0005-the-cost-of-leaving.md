@@ -1,6 +1,6 @@
 # Plan 0005 — The cost of leaving: pursuit, the prepared exit, stashes, and the career tournament
 
-Status: READY
+Status: DONE
 
 ## Sources
 
@@ -189,6 +189,6 @@ migration.
 - [x] session.py stash command + status; pages.py map/sheet lines
 - [x] bench_policy.py --careers tournament (five policies, report, health lines)
 - [x] contract suites green (`python -m unittest`)
-- [ ] benches re-run (`tune.py`, `bench_policy.py`, `--careers`); BENCHLOG entry vs targets
-- [ ] PLAYBOOK pursuit-and-stash paragraph
-- [ ] CLAUDE.md status updated
+- [x] benches re-run (`tune.py`, `bench_policy.py`, `--careers`); BENCHLOG entry vs targets
+- [x] PLAYBOOK pursuit-and-stash paragraph
+- [x] CLAUDE.md status updated

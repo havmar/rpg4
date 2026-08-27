@@ -451,7 +451,9 @@ class TestThePreparedExit(unittest.TestCase):
         self.assertEqual(state["delver"]["guard"], engine.guard(stock_delver()) + 1)
 
     def test_the_auto_flee_still_fires_at_the_flee_line(self):
-        below = run_to_end(stock_delver(hp=5), [wall(hp=400)], "skirmish", 1)
+        # hp tracks the constant: just under the flee line, wherever it is set
+        under = int(engine.SKIRMISH_FLEE_FRAC * engine.hp_max(stock_delver()))
+        below = run_to_end(stock_delver(hp=under), [wall(hp=400)], "skirmish", 1)
         self.assertEqual(below["outcome"], "retreated")
         self.assertEqual(below["rounds"], 1)
         self.assertTrue(texts(below, "this is the moment you planned to leave"))

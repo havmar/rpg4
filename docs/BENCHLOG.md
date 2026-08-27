@@ -199,3 +199,100 @@ bench the plan-0002 caveat called for, landed.
 Watch after 0005 lands: skirmish survival should settle in the 70–80%
 band at d3–d6 with picked-vs-best-fixed ≥ +3pp at two or more depths;
 the career tournament should show committed play out-earning the hedge.
+
+## 2026-08-27 — plan 0005 (the cost of leaving)
+
+`python tune.py --runs 300 --careers 1000`, `python bench_policy.py`
+(defaults: 25 encounters, 60 train, 60 test), `python bench_policy.py
+--careers 400` — the career tournament this plan built, first real run.
+Flee deaths were measured with a throwaway probe (not committed) that
+drives `_withdraw` directly with the delver pinned at the threshold hp,
+40 encounters × 60 seeds per depth per stance.
+
+**One lever applied: the skirmish flee line, 40% → 35% hp**
+(`SKIRMISH_FLEE_FRAC`). It is the first lever in the plan's list and the
+only one that pushes both open misses the right way. The second lever
+(skirmish attack back to −1) was deliberately **not** applied: it is the
+lever for a skirmish that fights too badly, and every miss below wants
+skirmish worse, not better. The third (withdraw light cost 2) was tried
+and **reverted** — see the tuning notes.
+
+Plan targets, actuals:
+
+- **Skirmish survival ≤ 85% at d4–d6: MISS at d4 and d5.** d4 91%, d5
+  87%, d6 83% (from 95 / 91 / 89 before the flee-line lever, against the
+  pre-plan baseline of 88 / 91 / 89). Skirmish remains the best-survival
+  stance at every depth from d2 down (d6: skirmish 83%, press 42%, ward
+  36%, measure 25%) — that half of the target holds, at a price the
+  fight layer cannot see. Why the miss, honestly: the *prepared exit*
+  cuts every pursuer to one strike and zeroes the relentless bonus, so
+  for skirmish specifically 0005 made leaving **cheaper in hp** while
+  making it cost light. The pursuit table's teeth land on committed
+  stances, which now flee into two strikes from swift things and +2 atk
+  from relentless ones. That is the settled design ("skirmish keeps its
+  identity and pays for it" — in attack and in light), so the fight-layer
+  number was never reachable by tuning inside this plan's levers. Flagged
+  rather than forced.
+- **Picked-vs-best-fixed ≥ +3pp at two or more depths: MISS.** −0, −0,
+  −1, −0, +1, −0 pp at d1–d6. The matchup table still collapses into
+  "skirmish unless trivial" when survival is scored without light.
+  Knowledge value vs fixed measure is large and depth-scaling as before:
+  +1 / +8 / +24 / +37 / +54 / +58 pp. Context-stable signatures: 35 of 42.
+- **Flee deaths: HIT (one 0.3pp overshoot).** Withdrawing at exactly 40%
+  hp — the worst legal case — dies: measure ≤ 7.4%, ward ≤ 1.8%, press
+  ≤ 10.3% (d4; the bar is 10%, n = 2400, se ≈ 0.6pp), skirmish ≤ 3.0%.
+  At 55% hp everything is ≤ 6.0% and skirmish ≤ 0.3%. Dying mid-flee
+  means you left far too late, which is what the plan asked for.
+- **Career layer, dominance line prints "none": HIT on the line, MISS on
+  the framing.** Careers 400 (informed 80): hedge 21% died / 204 median
+  chits / 8.6 expeditions / 8.0 light per expedition / 13.5 flees per
+  career; committed 90% died / 54 median; ramp 67% / 114; satchel 75% /
+  76; informed 59% / 290. The line reads "none" only because *informed*
+  out-banks the hedge — among the simple policies the hedge is still the
+  best line, and it banks 378% of committed's median, not the ≤ 60% the
+  plan wanted. Two readings for the next design session: (a) the
+  comparator is a strawman — `committed` as specced has no exit at all
+  (after its one pause it fights to the death), which is why it dies 90%
+  of the time in 2.5 expeditions; against ramp, the honest baseline, the
+  hedge banks 179%; (b) the real result is structural, and it is the same
+  one 0002 and the v4 probe found: a policy that can leave *any* fight at
+  40% hp out-survives one that cannot, and one lamp per exit prices about
+  ten flees against a lamp that holds ten. The light tax is real and
+  measured — the hedge burns 8.0 light per expedition against ramp's 4.2,
+  nearly double — it simply does not bite hard enough to cost the hedge
+  its lead.
+- **Knowledge value (informed vs ramp): HIT, positive on both.** −8pp
+  died and +176 median chits. Simulating the pending encounter before
+  choosing a stance is worth a great deal now that stances differ in what
+  leaving costs; the career bench is the first instrument that can say so.
+- **`tune.py` regression: HIT.** At n = 1000, ramp 69% death (plan-0004
+  baseline 70%) and satchel 77% (79%), both inside the ±8 band. Median
+  career chits 109 / 76 against 102 / 69. This plan prices exits; it did
+  not re-tune fights, and the sweep agrees. Combat grid, rumor and fork
+  censuses are unchanged except the skirmish rows, which now show the
+  flee line at 35%: skirmish wins a few more (d4 21% → 24%, d6 6% → 7%)
+  and dies for it (d4 3% → 6%, d6 17% → 21% down). Stance diversity holds
+  at the 0002 reading — best-survival share measure 20 / press 20 /
+  skirmish 60, and press best in 80% of the matchups among stances that
+  stay.
+
+**Tuning notes.** Withdraw light cost 2 was measured and rejected: it
+moved the hedge's median take 208 → 186 (−11%) and its flees 13.6 → 12.5,
+left its death rate flat, and taxed ramp and satchel 0.4 light per
+expedition for nothing. Against a target that needs roughly a 70%
+reduction that is not a fix — and on the felt side it is a bad trade: a
+lamp holds 10, so 2 light is a fifth of an expedition's clock for one
+flee, paid by a player who flees once or twice where the hedge policy
+flees thirteen times a career. The sims understate the player here in the
+direction that matters (ENGINE.md, tuning principle), so the cost stays 1.
+
+**For the next design session.** The exit hedge survived this plan. The
+levers left are not in the fight numbers: price the exit by *what you are
+leaving* (depth or the group's menace, so fleeing d6 is not fleeing d1),
+or by *how often you have left* in one expedition — an exit fatigue,
+which is the one shape that makes always-skirmish pay a rising bill while
+leaving the player's occasional flee cheap. Dropping carried salvage on a
+flee is already declined (0005, design arguments) and stays declined. Also
+worth a look: `bench_policy`'s `committed` policy needs an exit rule that
+is not "never" before it can serve as the honest comparator the dominance
+target assumes.

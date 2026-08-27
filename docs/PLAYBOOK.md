@@ -41,6 +41,24 @@ quiet — exactly as quiet as the other quiet — and let the player price it.
 The drum has no reading on a fork, and neither does the DM: what is behind
 a door belongs to nerve and appetite.
 
+**Leaving is narrated from what chases you.** The engine prices a
+withdraw by trait, and the narration says which trait did it: a lurker
+does not follow — it settles back and waits for the next one through; a
+swift thing is on you twice before you are clear; a relentless one comes
+after you and lands harder for the chase. Out of skirmish the way was
+mapped before the fight started, so every pursuer gets one blow and no
+more — describe an exit that was planned, never one that was lucky. The
+lamp-and-breath line is a real price, not flavor: leaving burns light
+like everything else that takes time.
+
+A stash is the delver's own, and only ever theirs. Value left at a depth
+is a promise to come back — narrate it as caching, in their own hand, at
+a place they mean to see again, and narrate the reunion when they return
+and it comes back into the satchel. Never place another delver's stash,
+and never let a trace read as one: the traces rule below is not softened
+by this verb, and the Understory keeps what it took. A stash dies with
+the delver like everything else.
+
 ## Advice: facts, prices, and the drum
 
 Settled after session 2. The DM's counsel is **object-level only**: state
