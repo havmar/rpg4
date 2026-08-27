@@ -434,7 +434,8 @@ class TestSatchel(unittest.TestCase):
     def test_a_full_satchel_keeps_the_more_valuable_find(self):
         cap = engine.satchel_cap(self.d)
         self.fill(*([5] * (cap - 1) + [2]))
-        lines = content.take_salvage(self.d, "a better thing", 9)
+        taken, lines = content.take_salvage(self.d, "a better thing", 9)
+        self.assertTrue(taken)
         self.assertEqual(len(self.d["salvage"]), cap)
         self.assertIn("a better thing", [i["name"] for i in self.d["salvage"]])
         self.assertNotIn(2, [i["value"] for i in self.d["salvage"]])
@@ -443,10 +444,248 @@ class TestSatchel(unittest.TestCase):
     def test_the_cheapest_find_is_left_behind(self):
         cap = engine.satchel_cap(self.d)
         self.fill(*[5] * cap)
-        lines = content.take_salvage(self.d, "a worse thing", 3)
+        taken, lines = content.take_salvage(self.d, "a worse thing", 3)
+        self.assertFalse(taken)  # the only case that reports a refusal
         self.assertEqual(len(self.d["salvage"]), cap)
         self.assertNotIn("a worse thing", [i["name"] for i in self.d["salvage"]])
         self.assertIn("stays where it lies", lines[0])
+
+
+class TestStashes(unittest.TestCase):
+    """A cache is a promise to come back: value at a depth, safe from
+    pursuit, worth nothing unless you return for it."""
+
+    def setUp(self):
+        self.cat, self.save = TestExpeditionFlow().fresh_save()
+        self.save["expedition"].update({"active": True, "depth": 3})
+        self.d = self.save["delver"]
+        self.d["stats"]["craft"] = 1  # satchel cap 5, whatever the deal gave
+        self.d["salvage"] = []
+
+    def fill(self, *values):
+        for i, v in enumerate(values):
+            self.d["salvage"].append({"name": "thing %d" % v, "value": v})
+
+    def values(self):
+        return sorted(i["value"] for i in self.d["salvage"])
+
+    def cached(self):
+        return [sorted(i["value"] for i in r["items"]) for r in self.save["stashes"]]
+
+    def test_stashing_moves_the_whole_satchel(self):
+        self.fill(4, 9)
+        lines = content.do_stash(self.save)
+        self.assertEqual(self.d["salvage"], [])
+        self.assertEqual([r["depth"] for r in self.save["stashes"]], [3])
+        self.assertEqual(self.cached(), [[4, 9]])
+        self.assertTrue(any("thing 9" in line for line in lines))
+
+    def test_a_round_trip_preserves_items_and_values(self):
+        self.fill(4, 9)
+        before = [dict(i) for i in self.d["salvage"]]
+        content.do_stash(self.save)
+        lines = content.recover_stash(self.save)
+        self.assertEqual(sorted((i["name"], i["value"]) for i in self.d["salvage"]),
+                         sorted((i["name"], i["value"]) for i in before))
+        self.assertEqual(self.save["stashes"], [])
+        self.assertTrue(lines)
+
+    def test_recovery_takes_the_best_the_satchel_holds_and_leaves_the_rest(self):
+        cap = engine.satchel_cap(self.d)
+        self.assertEqual(cap, 5)
+        self.fill(*range(1, cap + 4))  # 8 things, values 1..8
+        content.do_stash(self.save)
+        content.recover_stash(self.save)
+        self.assertEqual(self.values(), [4, 5, 6, 7, 8])
+        self.assertEqual(self.cached(), [[1, 2, 3]])
+
+    def test_recovery_leaves_nothing_behind_when_it_all_fits(self):
+        self.fill(1, 2)
+        content.do_stash(self.save)
+        content.recover_stash(self.save)
+        self.assertEqual(self.values(), [1, 2])
+        self.assertEqual(self.save["stashes"], [])
+
+    def test_stashes_at_one_depth_merge_and_other_depths_do_not(self):
+        self.fill(4)
+        content.do_stash(self.save)
+        self.fill(9)
+        content.do_stash(self.save)
+        self.assertEqual(self.cached(), [[4, 9]])
+        self.save["expedition"]["depth"] = 4
+        self.fill(2)
+        content.do_stash(self.save)
+        self.assertEqual([r["depth"] for r in self.save["stashes"]], [3, 4])
+        self.assertEqual(self.cached(), [[4, 9], [2]])
+
+    def test_arriving_where_there_is_no_cache_is_quiet(self):
+        self.assertEqual(content.recover_stash(self.save), [])
+
+    def test_stashing_nothing_raises(self):
+        with self.assertRaises(ValueError):
+            content.do_stash(self.save)
+
+    def test_you_cannot_stash_with_something_watching_you(self):
+        exp = self.save["expedition"]
+        self.fill(4)
+        exp["pending_site"] = {"name": "a hall", "enemies": ["glasshound"]}
+        with self.assertRaises(ValueError):
+            content.do_stash(self.save)
+        exp["pending_site"] = None
+        exp["paused_fight"] = {"delver": {"hp": 3}}
+        with self.assertRaises(ValueError):
+            content.do_stash(self.save)
+        exp["paused_fight"] = None
+        exp["fork"] = [{"depth": 4, "rumor": "quiet"}]
+        with self.assertRaises(ValueError):
+            content.do_stash(self.save)
+        exp["fork"] = None
+        content.do_stash(self.save)  # ... and with the room clear, it works
+
+    def test_you_cannot_stash_in_wake(self):
+        self.fill(4)
+        self.save["expedition"]["active"] = False
+        with self.assertRaises(ValueError):
+            content.do_stash(self.save)
+
+    def test_a_cache_outlives_the_climb_and_banks_nothing(self):
+        self.fill(4, 9)
+        content.do_stash(self.save)
+        self.save["expedition"]["pending_site"] = None
+        content.do_surface(self.cat, self.save)
+        self.assertEqual(self.cached(), [[4, 9]])
+        self.assertEqual(self.save["wake"]["chits"], 0)
+
+    def test_the_delve_back_down_finds_the_cache(self):
+        cat, save = TestExpeditionFlow().fresh_save(99)
+        exp, d = save["expedition"], save["delver"]
+        for _ in range(2):
+            _delve_through(cat, save)
+            exp["pending_site"] = None
+        self.assertEqual(exp["depth"], 2)
+        d["salvage"] = [{"name": "a cached thing", "value": 7}]
+        content.do_stash(save)
+        exp["depth"] = 1  # where a retreat would have left you
+        _, lines = _delve_through(cat, save)
+        self.assertEqual(exp["depth"], 2)
+        self.assertEqual(save["stashes"], [])
+        self.assertIn("a cached thing", [i["name"] for i in d["salvage"]])
+        self.assertTrue(any("cache" in line for line in lines))
+
+    def test_falling_back_from_a_fight_finds_the_cache(self):
+        save, exp, d = self.save, self.save["expedition"], self.d
+        self.fill(6)
+        content.do_stash(save)  # cached at depth 3
+        exp["depth"] = 4
+        exp["pending_site"] = {"name": "a test hall", "enemies": ["glasshound"]}
+        result = {"outcome": "retreated", "hp": 9, "grit": 1, "light": 3, "worst_blow": 0,
+                  "rounds": 4, "kills": [], "events": [], "menace_defeated": 0}
+        content.apply_fight_result(self.cat, save, result)
+        self.assertEqual(exp["depth"], 3)
+        self.assertEqual(d["light"], 3)  # the withdraw's price lands on the delver
+        self.assertEqual(self.values(), [6])
+        self.assertEqual(save["stashes"], [])
+
+    def test_the_v5_save_shape_is_complete(self):
+        cat, save = TestExpeditionFlow().fresh_save()
+        self.assertEqual(save["version"], 5)
+        self.assertEqual(engine.SAVE_VERSION, 5)
+        self.assertEqual(save["stashes"], [])
+        self.assertEqual(json.loads(json.dumps(save)), save)
+
+    def test_a_save_with_no_stashes_key_raises(self):
+        """No migration, ever: a save that cannot hold a cache is a bug."""
+        old = json.loads(json.dumps(self.save))
+        del old["stashes"]
+        with self.assertRaises(KeyError):
+            content.recover_stash(old)
+
+    def test_a_career_that_caches_replays_byte_identical(self):
+        def career(seed):
+            cat, save = TestExpeditionFlow().fresh_save(seed)
+            d = save["delver"]
+            for _ in range(10):
+                if not d["alive"]:
+                    break
+                exp = save["expedition"]
+                if exp["pending_site"] and exp["pending_site"].get("enemies"):
+                    paused, _ = content.start_pending_fight(cat, save, "skirmish")
+                    if paused:
+                        content.resume_paused_fight(cat, save, "withdraw")
+                    continue
+                if d["salvage"]:
+                    content.do_stash(save)
+                _delve_through(cat, save)
+            return json.dumps(save, sort_keys=True)
+        self.assertEqual(career(4242), career(4242))
+        self.assertTrue(json.loads(career(4242))["stashes"] is not None)
+
+    def test_the_pages_show_a_cache(self):
+        import pages
+        self.fill(4, 9)
+        content.do_stash(self.save)
+        self.save["expedition"]["sites"] = [
+            {"depth": 3, "kind": "salvage", "name": "a shelf of drawers"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            old, pages.RUNS_DIR = pages.RUNS_DIR, tmp
+            try:
+                pages.write_map(self.save)
+                pages.write_delver(self.save)
+                with open(os.path.join(pages.run_dir(self.save), "map.txt"), encoding="utf-8") as f:
+                    mapped = f.read()
+                with open(os.path.join(pages.run_dir(self.save), "delver.txt"), encoding="utf-8") as f:
+                    sheet = f.read()
+            finally:
+                pages.RUNS_DIR = old
+        self.assertIn("..stash: 2 items", mapped)
+        self.assertIn("depth 3: 2 items worth 13", sheet)
+
+
+class TestTheCareerTournament(unittest.TestCase):
+    """The instrument the plan-0002 benchlog asked for: it must be
+    repeatable, and it must not peek at the fight that is waiting."""
+
+    def pending_fight(self, cat, save):
+        exp = save["expedition"]
+        for _ in range(60):
+            _delve_through(cat, save)
+            if exp["pending_site"] and exp["pending_site"].get("enemies"):
+                return
+            exp["depth"] = 1  # stay shallow; we only want an encounter
+        self.fail("no encounter in 60 delves")
+
+    def resolve(self, cat, save):
+        paused, _ = content.start_pending_fight(cat, save, "measure")
+        if paused:
+            content.resume_paused_fight(cat, save, "fight_on")
+        return save["last_fight"]["events"]
+
+    def test_every_policy_produces_a_full_row(self):
+        import bench_policy
+        keys = {"policy", "careers", "died", "expeditions", "chits_mean",
+                "chits_median", "max_depth", "light", "flees"}
+        for policy in bench_policy.CAREER_POLICIES:
+            row = bench_policy.career_row(policy, 2, 2)
+            self.assertEqual(set(row), keys, policy)
+            self.assertEqual(row["careers"], 2)
+            self.assertEqual(row["policy"], policy)
+
+    def test_the_tournament_is_deterministic(self):
+        import bench_policy
+        self.assertEqual(bench_policy.career_row("hedge", 3, 2),
+                         bench_policy.career_row("hedge", 3, 2))
+        self.assertNotEqual(bench_policy.career_row("hedge", 3, 2),
+                            bench_policy.career_row("committed", 3, 2))
+
+    def test_the_informed_sims_cannot_peek_at_the_waiting_fight(self):
+        import bench_policy
+        cat, save = TestExpeditionFlow().fresh_save(515)
+        self.pending_fight(cat, save)
+        untouched = json.loads(json.dumps(save))
+        stance = bench_policy.informed_stance(cat, save)
+        self.assertIn(stance, engine.STANCES)
+        self.assertEqual(save, untouched)  # nothing drawn, nothing spent
+        self.assertEqual(self.resolve(cat, save), self.resolve(cat, untouched))
 
 
 class TestCommission(unittest.TestCase):
@@ -857,7 +1096,7 @@ class TestForks(unittest.TestCase):
 
     def test_the_save_shape_is_complete(self):
         cat, save = self.fresh()
-        self.assertEqual(save["version"], 4)
+        self.assertEqual(save["version"], engine.SAVE_VERSION)
         for key in ("fork", "declined"):
             self.assertIn(key, save["expedition"])
         blob = json.loads(json.dumps(save))

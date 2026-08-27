@@ -350,6 +350,7 @@ def new_save(cat, world_seed):
         "expedition": {"active": False, "depth": 0, "sites": [], "pending_site": None,
                        "paused_fight": None, "free_delve": False,
                        "fork": None, "declined": []},
+        "stashes": [],
         "wake": {"chits": 0, "day": 1, "expeditions": 0, "commission": None},
         "history": ["Day 1: %s, %s, went down the great mouth."
                     % (delver["name"], delver["background"])],
@@ -364,24 +365,88 @@ def new_save(cat, world_seed):
 # full" is a reason to climb that is not a punishment.
 
 def take_salvage(delver, name, value):
-    """Put a find in the satchel, or decide what it displaces. Returns lines."""
+    """Put a find in the satchel, or decide what it displaces.
+
+    Returns (taken, lines): `taken` is False only when the satchel is full
+    of better things and the find stays where it lies.
+    """
     if name == SCRAP:
         for carried in delver["salvage"]:
             if carried["name"] == SCRAP:  # scrap merges; it never costs a second slot
                 carried["value"] += value
-                return ["Scrap goes in with the rest (the lot is worth %d)." % carried["value"]]
+                return True, ["Scrap goes in with the rest (the lot is worth %d)." % carried["value"]]
     cap = engine.satchel_cap(delver)
     if len(delver["salvage"]) < cap:
         delver["salvage"].append({"name": name, "value": value})
-        return ["Salvage taken: %s (worth %d) [satchel %d/%d]."
-                % (name, value, len(delver["salvage"]), cap)]
+        return True, ["Salvage taken: %s (worth %d) [satchel %d/%d]."
+                      % (name, value, len(delver["salvage"]), cap)]
     cheapest = min(delver["salvage"], key=lambda i: (i["value"], i["name"]))
     if value > cheapest["value"]:
         delver["salvage"].remove(cheapest)
         delver["salvage"].append({"name": name, "value": value})
-        return ["The satchel is full: you drop %s (worth %d) and take %s (worth %d)."
-                % (cheapest["name"], cheapest["value"], name, value)]
-    return ["The satchel is full; %s (worth %d) stays where it lies." % (name, value)]
+        return True, ["The satchel is full: you drop %s (worth %d) and take %s (worth %d)."
+                      % (cheapest["name"], cheapest["value"], name, value)]
+    return False, ["The satchel is full; %s (worth %d) stays where it lies." % (name, value)]
+
+
+# -------------------------------------------------------------- the stashes
+# Push-your-luck plumbing, not banking: a stash turns satchel weight into a
+# promise to come back. Only surfacing banks; a stash dies with the delver.
+
+def do_stash(save):
+    """Leave the whole satchel at this depth. Returns lines."""
+    delver = save["delver"]
+    exp = save["expedition"]
+    if not exp["active"]:
+        raise ValueError("you cache things in the deep, not in Wake")
+    if exp["paused_fight"] or (exp["pending_site"] and exp["pending_site"].get("enemies")):
+        raise ValueError("you cannot stop to cache anything with something watching you")
+    if exp["fork"]:
+        raise ValueError("choose a passage first; you cache in a room, not in a doorway")
+    if not delver["salvage"]:
+        raise ValueError("the satchel is empty")
+    depth = exp["depth"]
+    items = delver["salvage"]
+    delver["salvage"] = []
+    record = next((s for s in save["stashes"] if s["depth"] == depth), None)
+    if record is None:
+        record = {"depth": depth, "items": []}
+        save["stashes"].append(record)
+        save["stashes"].sort(key=lambda s: s["depth"])
+    record["items"].extend(items)
+    lines = ["You wedge the satchel's whole weight into a hollow at depth %d:" % depth]
+    for item in items:
+        lines.append("  - %s (worth %d)" % (item["name"], item["value"]))
+    lines.append("Cached at depth %d: %d items, worth %d. Worth nothing until you come back."
+                 % (depth, len(record["items"]), sum(i["value"] for i in record["items"])))
+    return lines
+
+
+def recover_stash(save):
+    """Arriving where you left something. Returns lines.
+
+    The cache empties into the satchel most valuable first, under the
+    satchel's own rules; what will not fit stays cached.
+    """
+    delver = save["delver"]
+    depth = save["expedition"]["depth"]
+    record = next((s for s in save["stashes"] if s["depth"] == depth), None)
+    if record is None:
+        return []
+    lines = ["Your cache at depth %d is where you left it." % depth]
+    left = []
+    for item in sorted(record["items"], key=lambda i: (-i["value"], i["name"])):
+        taken, said = take_salvage(delver, item["name"], item["value"])
+        lines.extend(said)
+        if not taken:
+            left.append(item)
+    if left:
+        record["items"] = left
+        lines.append("What will not fit stays cached (%d items, worth %d)."
+                     % (len(left), sum(i["value"] for i in left)))
+    else:
+        save["stashes"].remove(record)
+    return lines
 
 
 # ---------------------------------------------------------- the commission
@@ -488,6 +553,7 @@ def _enter_site(cat, save, site, lines):
     if _darkness(delver):
         lines.append("The lamp is dry. You move in the dark now.")
     exp["sites"].append({"depth": site["depth"], "kind": site["kind"], "name": site["name"]})
+    lines.extend(recover_stash(save))  # you are back where you left something
     rng = _evt_rng(save)
     if site["kind"] == "encounter":
         exp["pending_site"] = site
@@ -495,13 +561,13 @@ def _enter_site(cat, save, site, lines):
     elif site["kind"] == "salvage":
         for name in site["salvage"]:
             item = by_name(cat["salvage"], name)
-            lines.extend(take_salvage(delver, item["name"], item["value"]))
+            lines.extend(take_salvage(delver, item["name"], item["value"])[1])
         exp["pending_site"] = None
     elif site["kind"] == "strange":
         lines.extend(engine.apply_strange(delver, exp, site["effect"], rng))
         for name in site.get("salvage", []):
             item = by_name(cat["salvage"], name)
-            lines.extend(take_salvage(delver, item["name"], item["value"]))
+            lines.extend(take_salvage(delver, item["name"], item["value"])[1])
         exp["pending_site"] = None
     else:  # breather
         if engine.has_mark(delver, "breather_numb"):
@@ -553,12 +619,12 @@ def apply_fight_result(cat, save, result):
         exp["pending_site"] = None
         scrap = 2 * result["menace_defeated"]
         lines.append("You strip the field: scrap worth %d." % scrap)
-        lines.extend(take_salvage(delver, SCRAP, scrap))
+        lines.extend(take_salvage(delver, SCRAP, scrap)[1])
         rng = _evt_rng(save)
         if rng.random() < 0.7:
             item = roll_salvage(cat, exp["depth"], rng)
             lines.append("Among the wreckage: %s (worth %d)." % (item["name"], item["value"]))
-            lines.extend(take_salvage(delver, item["name"], item["value"]))
+            lines.extend(take_salvage(delver, item["name"], item["value"])[1])
         save["history"].append("Day %d, depth %d: cleared %s (%s)."
                                % (save["wake"]["day"], exp["depth"], site["name"],
                                   ", ".join(site["enemies"])))
@@ -566,6 +632,7 @@ def apply_fight_result(cat, save, result):
         exp["pending_site"] = None
         exp["depth"] = max(0, exp["depth"] - 1)
         lines.append("You fall back to the previous gallery (depth %d)." % exp["depth"])
+        lines.extend(recover_stash(save))
         save["history"].append("Day %d: retreated from %s at depth %d."
                                % (save["wake"]["day"], site["name"], exp["depth"] + 1))
     else:  # down

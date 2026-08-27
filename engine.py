@@ -10,7 +10,7 @@ import json
 import random
 import re
 
-SAVE_VERSION = 4
+SAVE_VERSION = 5
 
 STATS = ["edge", "iron", "vim", "nerve", "craft"]
 
@@ -19,13 +19,17 @@ STANCES = {
     "measure": (0, 0, 0, 0),
     "press": (2, -2, 0, 2),
     "ward": (-2, 3, 1, 0),
-    "skirmish": (-1, 1, 0, 0),
+    # skirmish is the stance that plans its exit: it keeps the auto-withdraw
+    # and the prepared exit, and pays for both with attack.
+    "skirmish": (-2, 1, 0, 0),
 }
 
 PAUSE_HP_FRAC = 0.6
 SKIRMISH_FLEE_FRAC = 0.4
 FLEE_LATE_FRAC = 0.25
 LIGHT_CLOCK_ROUNDS = 4
+WITHDRAW_LIGHT_COST = 1
+RELENTLESS_PURSUIT_ATK = 2
 
 # Marks: small named conditions a hard fight leaves on you. The catalog
 # (catalogs/marks.json) names them; the engine owns what they do.
@@ -241,7 +245,7 @@ def pause_options(state):
         opts["steady"] = "spend 1 grit: shake off the fear"
     if d["grit"] >= 2:
         opts["surge"] = "spend 2 grit: next attack cannot miss and strikes double"
-    opts["withdraw"] = "pull out (every foe still up gets a parting blow)"
+    opts["withdraw"] = "pull out (costs light; what is still chasing sets the rest of the price)"
     return opts
 
 
@@ -382,11 +386,11 @@ def _delver_strike(state, rng):
             % (target["id"], target["soak"]), "crack")
 
 
-def _enemy_strike(state, rng, enemy, free=False):
+def _enemy_strike(state, rng, enemy, atk_bonus=0):
     d = state["delver"]
     if enemy["hp"] <= 0 or d["hp"] <= 0:
         return
-    atk = enemy["atk"]
+    atk = enemy["atk"] + atk_bonus
     if "relentless" in enemy["traits"] and d["hp"] * 2 < d["hp_max"]:
         atk += 2
     if state["round"] == 1 and "lurker" in enemy["traits"]:
@@ -453,13 +457,34 @@ def _finish(state, outcome):
     return None, result
 
 
+def _pursuit(enemy, prepared):
+    """What leaving costs you, per living enemy: (strikes, attack bonus).
+
+    What is chasing you decides the price. A lurker does not chase -- it
+    waits for the next one through. A prepared exit (skirmish) means you
+    mapped the way out: everyone gets one blow at you, and nothing more.
+    """
+    if "lurker" in enemy["traits"]:
+        return 0, 0
+    if prepared:
+        return 1, 0
+    strikes = 2 if "swift" in enemy["traits"] else 1
+    return strikes, RELENTLESS_PURSUIT_ATK if "relentless" in enemy["traits"] else 0
+
+
 def _withdraw(state, rng):
+    d = state["delver"]
+    prepared = state["stance"] == "skirmish"
     _ev(state, 1, "You break away; parting blows come.")
+    if d["light"] > 0:  # a fight already in the dark has no lamp left to spend
+        d["light"] = max(0, d["light"] - WITHDRAW_LIGHT_COST)
+        _ev(state, 1, "You spend lamp and breath getting clear: -%d light."
+            % WITHDRAW_LIGHT_COST)
     for enemy in list(_living(state)):
-        strikes = 2 if "swift" in enemy["traits"] else 1
+        strikes, bonus = _pursuit(enemy, prepared)
         for _ in range(strikes):
-            _enemy_strike(state, rng, enemy)
-    if state["delver"]["hp"] <= 0:
+            _enemy_strike(state, rng, enemy, atk_bonus=bonus)
+    if d["hp"] <= 0:
         return _finish(state, "down")
     return _finish(state, "retreated")
 

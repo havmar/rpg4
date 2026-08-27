@@ -11,6 +11,7 @@ content.py, and the numbers live in the catalogs.
     python session.py fight --stance press   # resolve the pending fight
     python session.py fight --resume surge   # answer a mid-fight pause
     python session.py odds                   # wind the drum: odds on this fight
+    python session.py stash                  # cache the whole satchel at this depth
     python session.py camp | surface | status | market | log
     python session.py train edge | buy "salvage axe"
     python session.py sheet -m "message"     # rewrite + commit + push run pages
@@ -128,6 +129,10 @@ def cmd_status(cat, args):
              save["wake"]["commission"]["bonus"]))
     if d["salvage"]:
         print("carrying: " + ", ".join("%s(%d)" % (i["name"], i["value"]) for i in d["salvage"]))
+    for rec in save["stashes"]:
+        print("cached at depth %d (%d items, worth %d): %s"
+              % (rec["depth"], len(rec["items"]), sum(i["value"] for i in rec["items"]),
+                 ", ".join("%s(%d)" % (i["name"], i["value"]) for i in rec["items"])))
     for mark in d["marks"]:
         print("mark: %s -- %s" % (mark["name"], mark["text"]))
     if exp["fork"]:
@@ -201,6 +206,13 @@ def cmd_fight(cat, args):
             print("THE FIGHT PAUSES. Choose (session.py fight --resume <option>):")
             for key, desc in sorted(engine.pause_options(save["expedition"]["paused_fight"]).items()):
                 print("  %-9s %s" % (key, desc))
+    write_save(save)
+
+
+def cmd_stash(cat, args):
+    save = load_save()
+    require_alive(save)
+    say(content.do_stash(save))
     write_save(save)
 
 
@@ -290,6 +302,8 @@ def main(argv=None):
 
     for name, fn, msg in (("status", cmd_status, "where things stand"),
                           ("camp", cmd_camp, "heal and steady (1 supply, 1 light)"),
+                          ("stash", cmd_stash, "cache the whole satchel at this depth; "
+                                               "it comes back to you when you return here"),
                           ("surface", cmd_surface, "climb out, bank salvage, rest in Wake"),
                           ("market", cmd_market, "what Wake sells"),
                           ("log", cmd_log, "print the full last-fight log")):

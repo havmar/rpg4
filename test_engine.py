@@ -331,6 +331,137 @@ class TestBeats(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(r["events"])), r["events"])
 
 
+# --------------------------------------------------------- plan 0005 pieces
+# Harmless pursuers, so the price of leaving is measured and not survived:
+# a wall can only touch you on a natural 20, and then only for 1.
+PARTING_RE = re.compile(r"^(\S+) (hits|misses) you \((\d+)([+-]\d+) vs (\d+)\)")
+
+# vim 6 puts the pause line (60%) well clear of the relentless in-fight
+# clause (half hp), so a parting-strike bonus is the only thing measured.
+TOUGH = {"edge": 2, "iron": 2, "vim": 6, "nerve": 2, "craft": 2}
+
+
+def pursuer(name, traits):
+    return wall(name=name, traits=list(traits), hp=400)
+
+
+def parting(result):
+    """(attacker, attack modifier) for every blow struck after the break."""
+    out, leaving = [], False
+    for _, text, _ in result["events"]:
+        if text.startswith("You break away"):
+            leaving = True
+        elif leaving:
+            m = PARTING_RE.match(text)
+            if m:
+                out.append((m.group(1), int(m.group(4))))
+    return out
+
+
+class TestTheCostOfLeaving(unittest.TestCase):
+    """Pursuit: what is chasing you decides what leaving costs."""
+
+    def leave(self, enemies, stance="measure", seed=1, darkness=False, **over):
+        """Pause at round 2 with hp to spare, then pull out."""
+        d = stock_delver(stats=dict(TOUGH), hp=15, **over)
+        state, result = engine.start_fight(d, enemies, stance, seed, darkness=darkness)
+        self.assertIsNone(result, "expected a pause, got %r" % (result and result["outcome"]))
+        r = engine.resume_fight(state, "withdraw")
+        self.assertEqual(r["outcome"], "retreated")
+        self.assertGreaterEqual(r["hp"] * 2, engine.hp_max(d),
+                                "the harmless pursuers did real damage; the fixture is wrong")
+        return r
+
+    def strikes(self, result):
+        counts = {}
+        for who, _ in parting(result):
+            counts[who] = counts.get(who, 0) + 1
+        return counts
+
+    def test_the_pursuit_table(self):
+        r = self.leave([pursuer("lurker", ["lurker"]), pursuer("swift", ["swift"]),
+                        pursuer("plain", [])])
+        # the lurker does not chase: it waits for the next one through
+        self.assertEqual(self.strikes(r), {"swift#1": 2, "plain#1": 1})
+
+    def test_relentless_parting_blows_come_at_a_bonus(self):
+        plain = self.leave([pursuer("plain", [])])
+        chase = self.leave([pursuer("plain", ["relentless"])])
+        self.assertEqual([mod for _, mod in parting(plain)], [-30])
+        self.assertEqual([mod for _, mod in parting(chase)],
+                         [-30 + engine.RELENTLESS_PURSUIT_ATK])
+
+    def test_a_swift_relentless_thing_gets_both(self):
+        r = self.leave([pursuer("hunter", ["swift", "relentless"])])
+        self.assertEqual([mod for _, mod in parting(r)], [-28, -28])
+
+    def test_the_prepared_exit_caps_every_pursuer_at_one(self):
+        enemies = [pursuer("lurker", ["lurker"]), pursuer("swift", ["swift"]),
+                   pursuer("hunter", ["relentless"])]
+        r = self.leave(enemies, stance="skirmish")
+        self.assertEqual(self.strikes(r), {"swift#1": 1, "hunter#1": 1})
+        self.assertEqual({mod for _, mod in parting(r)}, {-30})  # and no pursuit bonus
+
+    def test_a_room_of_lurkers_lets_you_walk_out_of_any_stance(self):
+        for stance in sorted(engine.STANCES):
+            r = self.leave([pursuer("waiting", ["lurker"]), pursuer("patient", ["lurker"])],
+                           stance=stance)
+            self.assertEqual(parting(r), [], stance)
+
+    def test_leaving_costs_one_light(self):
+        r = self.leave([pursuer("plain", [])], light=10)
+        self.assertEqual(r["light"], 10 - engine.WITHDRAW_LIGHT_COST)
+        self.assertEqual(len(texts(r, "You spend lamp and breath getting clear")), 1)
+
+    def test_a_fight_that_started_dark_has_no_lamp_left_to_spend(self):
+        r = self.leave([pursuer("plain", [])], light=0, darkness=True)
+        self.assertEqual(r["light"], 0)
+        self.assertEqual(texts(r, "You spend lamp and breath getting clear"), [])
+
+    def test_the_stalemate_valve_pays_the_same_prices(self):
+        d = stock_delver(hp=200, light=200, weapon={"name": "shiv", "dmg": "1d2", "acc": 0})
+        state, result = engine.start_fight(d, [wall(hp=4000)], "measure", 3)
+        self.assertIsNone(state, "the valve must end the fight, not pause it")
+        self.assertEqual(result["outcome"], "retreated")
+        self.assertEqual(result["rounds"], 50)
+        self.assertEqual(len(parting(result)), 1)
+        self.assertEqual(result["light"],
+                         200 - 50 // engine.LIGHT_CLOCK_ROUNDS - engine.WITHDRAW_LIGHT_COST)
+
+
+class TestThePreparedExit(unittest.TestCase):
+    """Skirmish keeps the exit and pays for it with attack."""
+
+    def test_the_skirmish_tuple(self):
+        self.assertEqual(engine.STANCES["skirmish"], (-2, 1, 0, 0))
+
+    def test_the_combatant_build_carries_it(self):
+        d = stock_delver()
+        c = engine._combatant_from_delver(d, "skirmish", False)
+        self.assertEqual(c["atk"], engine.attack_bonus(d) - 2)
+        self.assertEqual(c["guard"], engine.guard(d) + 1)
+        self.assertEqual(c["soak"], engine.soak(d))
+        self.assertEqual(c["dmg_bonus"], 0)
+
+    def test_switching_into_skirmish_moves_attack_by_two(self):
+        seed, state = TestFight().find_pausing_seed()  # stance: measure
+        before = state["delver"]["atk"]
+        engine._switch_stance(state, "skirmish")
+        self.assertEqual(state["delver"]["atk"], before - 2)
+        self.assertEqual(state["delver"]["guard"], engine.guard(stock_delver()) + 1)
+
+    def test_the_auto_flee_still_fires_at_the_flee_line(self):
+        below = run_to_end(stock_delver(hp=5), [wall(hp=400)], "skirmish", 1)
+        self.assertEqual(below["outcome"], "retreated")
+        self.assertEqual(below["rounds"], 1)
+        self.assertTrue(texts(below, "this is the moment you planned to leave"))
+
+    def test_above_the_flee_line_it_pauses_instead(self):
+        state, result = engine.start_fight(stock_delver(hp=8), [wall(hp=400)], "skirmish", 1)
+        self.assertIsNone(result)
+        self.assertEqual(state["delver"]["hp"], 8)  # nothing crossed the line
+
+
 class TestMarkEffects(unittest.TestCase):
     def marked(self, effect):
         return stock_delver(marks=[{"name": "test mark", "effect": effect, "text": "t"}])
