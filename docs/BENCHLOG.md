@@ -296,3 +296,159 @@ flee is already declined (0005, design arguments) and stays declined. Also
 worth a look: `bench_policy`'s `committed` policy needs an exit rule that
 is not "never" before it can serve as the honest comparator the dominance
 target assumes.
+
+## 2026-08-27 — plan 0006 (the outfitter's shelf)
+
+`python -m unittest` (226 green), `python tune.py --runs 300 --careers 1000`,
+`python bench_policy.py` (defaults: 25 encounters, 60 train, 60 test), and
+`python bench_policy.py --careers 1000` (the informed rows run 200 — they are
+160x the fights). Relic sightings, kit purchases and kit firings were counted
+with throwaway probes (not committed) that wrap `roll_relic`, `do_buy` and the
+three kit-consumption sites and then drive the bench's own career policies;
+the price comparisons were run in one process with the kit values patched in
+memory, so the file on disk was never the variable.
+
+**No lever kept.** The plan's one sanctioned tuning direction — reprice kit
+downward before touching effects — was applied, measured, and **reverted**;
+see the tuning notes, which are the substance of this entry. The catalogs,
+stance tuples, `RELIC_CHANCE` and `RELIC_MIN_DEPTH` all stand exactly as
+plan 0006 authored them, so every number below is a clean measurement of
+Round 3's code.
+
+Plan targets, actuals:
+
+- **Stance liveness: one clause HIT, three MISS.** Picks per depth over 25
+  encounters — d1 brace 23 / press 1 / ward 1; d2 brace 19 / press 1 /
+  skirmish 5; d3 brace 13 / skirmish 12; d4 brace 6 / press 2 / skirmish 17;
+  d5 brace 4 / skirmish 21; d6 brace 4 / press 3 / skirmish 18.
+  - *No stance over 55% at d2–d5*: **MISS** at three of the four — brace 76%
+    (d2), skirmish 68% (d4), skirmish 84% (d5). d3 is the one clean depth
+    (brace 52%, skirmish 48%).
+  - *Four stances picked ≥ 10% somewhere*: **MISS**, three qualify — brace
+    (92%, d1), skirmish (20%, d2), press (12%, d6). ward peaks at 4%; measure
+    and read are never picked at any depth.
+  - *read ≥ 10% somewhere at d3+*: **MISS**, read is picked zero times.
+  - *brace ≥ 10% where lurkers spawn*: **HIT** — brace is the pick at 16% or
+    better at every depth, and it takes both lurker signatures outright
+    (`1x saltfog strangler` → brace, `1x mirrorling` → brace, skirmish).
+  Fixed-stance survival on test seeds, d1→d6: brace 100/98/92/77/53/44,
+  skirmish 100/99/98/91/87/83, press 100/97/89/73/52/42, ward 99/95/83/66/44/36,
+  read 99/95/81/64/41/33, measure 98/91/73/54/34/25. Knowledge value vs measure
+  +1/+8/+25/+38/+55/+58pp; vs the best fixed stance +0pp at five depths and
+  +2pp at d5. Signatures seen 42, context-stable 38.
+
+- **Shoppers beat their non-shopping selves: MISS on both pairs.** At n=1000,
+  committed 90% died / 52 median chits against committed+shop 89% / 49 — the
+  death half is a wash inside noise and the median-chit half loses. At n=200,
+  informed 60% / 216 against informed+shop 62% / 198. Neither pair meets
+  "beats on death % at equal or better median chits" in any configuration
+  tried, at any price (below).
+
+- **Relic sightings under the satchel policy: 0.27 per career** (n=1000,
+  target 0.3–1.2). **MISS by 0.03** — a hairline, and career length is the
+  whole of it: ramp sees 0.30 over 6.2 expeditions and hedge 0.72 over 8.4,
+  both inside the band, while satchel dies in 4.5. The five relics come up in
+  even proportion (0.05–0.08 per career each), so the pick is not skewed. Not
+  tuned: no target names `RELIC_CHANCE` as a lever, the two policies that live
+  longer are both in band, and by the tuning principle a played delver looks
+  far more like hedge than like satchel.
+
+- **`tune.py` regression: HIT, exactly.** ramp 69% death (post-0005 entry:
+  69%) and satchel 77% (77%), median career chits 116 / 80 against 109 / 76.
+  The sweep was also run against the repriced catalog and came back
+  **byte-identical** — kit values are unreachable from ramp and satchel, which
+  never shop — so it is a clean regression check on Round 3's code and nothing
+  else.
+
+The combat grid has two new rows and they change its shape. brace wins more
+than any other stance that stays, at every depth (victory d1→d6
+99/96/92/79/52/36 against measure's 97/85/72/57/30/22), and takes the
+vitrified watchman 82% of the time, though slowly — 6.77 rounds against
+press's 4.30. read lands between measure and press on both axes
+(99/93/79/66/39/25 victory; watchman 72% in 5.65 rounds). The stance-diversity
+line moved accordingly: best-survival share is now brace 30 / press 10 /
+skirmish 60, and among stances that stay it is **brace 70 / press 30** — press
+held 80% of that column after 0002, so this plan did not lift the dominance,
+it handed it to a stance you have to buy.
+
+**Tuning notes: the reprice, and why it was reverted.** The purchase census is
+where the lever was aimed, and it is worth the space. The shopping policy buys
+the cheapest unheld kit, and as authored the two cheapest are the oil flask
+(6) and the tithe of oilbread (7). Measured over 1000 committed+shop careers:
+0.59 oil flasks and 1.75 tithes bought, 1.37 tithes fired, and the three
+auto-firing combat items bought **zero** times — all three are priced above
+the tithe. Worse, the oil flask fires through `use`, a verb no career policy
+calls, so the bench pays 6 chits to fill one of its two slots with something
+that can never go off. Two of six shelf items exercised, one of them as dead
+weight.
+
+The lever applied was a downward pass on the four items that fire on their own
+condition — dressing roll 8 → 5, flash powder 10 → 5, shard-hook rope 9 → 6,
+tithe of oilbread 7 → 6 — leaving the two you aim yourself alone, on the
+principle that kit which fires itself is narrower than kit you point. It did
+what it was aimed to do to the census: the shopper then bought the dressing
+roll (1.46 per career) and flash powder (1.29) and both fired (1.02 and 0.94),
+four of six items exercised and the fight-facing half of the shelf finally
+inside the measurement. It bought no survival. committed+shop went 89% → 90%
+died and 49 → 48 median chits; informed+shop went 62% → 64% died and 198 → 145
+median. Both arms moved the wrong way.
+
+So the lever was run to its floor to settle whether price is the axis at all.
+Forcing every kit item to one flat price, committed+shop at n=1000 dies 91% at
+value 5, 91% at 3, and 90% at **1 chit apiece** — against plain committed's
+90%, with the median take stuck at 48 in all three. **A shelf that is very
+nearly free does not move the death rate by a point.** There is therefore no
+price at which the shelf passes this target, the plan's sanctioned direction
+is exhausted, and cutting prices only buys a smaller spend decision in
+exchange for nothing measurable. The catalog was put back as authored.
+
+Attributing the small loss that remains (n=1000, at authored prices): the kit
+alone costs -0pp died and -2 median chits, the worn relic alone -1pp died and
+-2 median, both together -1pp and -3. The relic half of that is the mechanic
+working exactly as specced — `wear_first_relic` forgoes banking a 25–40 chit
+find, which is the bank-or-wear tension the whole plan was built around — but
+the target's "equal or better median chits" clause charges the shopper for
+taking the trade, so a relic worth wearing can still fail the target.
+
+**Caveats.** A shopping career is not the same world as its non-shopping self:
+firing kit draws from the event RNG and advances `save["counter"]`, so the two
+arms drift into different generated worlds rather than the same world played
+two ways. At n=1000 the death-rate comparison survives that (se ≈ 1pp on 90%),
+but the median-chit gaps should not be read closely — and the informed rows,
+at n=200, least closely of all. A properly paired A/B would need the shelf on
+a seed path of its own, the way the drum has one. And `committed` is still the
+strawman the plan-0005 entry flagged: 0.1 flees per career, dead in 2.4
+expeditions at mean max depth 5.3. It is the worst imaginable customer for a
+shelf of insurance — it dies in fights a 1d6 dressing roll cannot reach.
+
+**For the next design session.** Three items, worst first.
+
+1. **brace as authored dominates the defensive half of the stance table.** Its
+   tuple `(-1, +2, +2, 0)` is never worse than read's `(-2, +1, 0, 0)` in any
+   term and strictly better in three, so read can never be picked while brace
+   exists; and it beats ward and measure on survival *and* victory at every
+   depth in the grid above. A player who spends 25 chits on brace does not
+   gain an option, they retire two. The cheapest honest fix is brace's attack
+   term (-1 → -2, matching ward and skirmish), which turns brace and ward into
+   a real guard-versus-soak read and leaves the ambush immunity as what the 25
+   chits actually buy — but that re-tunes a stance this plan authored, so it
+   is flagged here rather than applied.
+2. **read never pays.** press dominates it on both axes at every depth (d4:
+   press 73% survival / 73% victory against read's 64 / 64), because press's
+   round-1 +2 atk and +2 dmg end the fight roughly a round sooner (4.0 against
+   5.1 at d4), and rounds are the one thing read needs and press denies. The
+   +5-from-round-3 is real and fires; it simply arrives in fights that are
+   already decided. If read is meant as an offense stance it wants press's
+   early risk — a negative guard term — rather than skirmish's tuple; if it is
+   meant as the long-fight stance, long fights have to be worth having, and
+   the light clock (0002) is currently the argument against them.
+3. **The career bench can only see half the shelf.** `use` is a player verb,
+   so the oil flask and the drum key are structurally invisible to every
+   policy; shard-hook rope only pays a policy that flees, and the two policies
+   that shop flee 0.1 and 3.8 times per career. Either the career policies
+   grow a `use` step and a real exit rule — which is the same fix the 0005
+   entry asked for on `committed` — or the shelf needs a bench of its own that
+   puts kit against the situations kit was bought for. Until one of those
+   exists, "the shelf must earn its prices" is not a question this instrument
+   can answer, and this entry's shopper miss should be read as a measurement
+   gap at least as much as a design one.

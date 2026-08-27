@@ -59,6 +59,24 @@ and never let a trace read as one: the traces rule below is not softened
 by this verb, and the Understory keeps what it took. A stash dies with
 the delver like everything else.
 
+**Kit fires itself; a relic is worn, not discussed.** Kit is insurance
+bought at the surface with its trigger declared at the counter, so the
+fight spends it for you and prints its own line when it does. Narrate the
+trigger, never a decision: the delver is not choosing in the moment, they
+are collecting on a choice already made in Wake. Nothing about kit is on
+the pause menu, and the one-pause law is untouched. The two pieces that
+are aimed rather than triggered — the oil flask and the drum key — go
+through `use`, and the DM states what they cost and what they do if asked,
+and stops there. A relic is the same shape one layer up: found, then worn
+or banked, once and for good — `equip` has no undo, the slot holds one,
+and a second relic shatters the first. The engine prints what a relic is
+when it comes out of the floor; after that it is something the delver
+carries, not an offer reopened at every surfacing. The drum has no row
+for it — the reckoning drum answers about the fight in front of you, and
+a relic is part of the delver, not part of the fight — and the DM does
+not price one against a coat or a level either. Bank it or wear it
+belongs to nerve and appetite, like the fork.
+
 ## Advice: facts, prices, and the drum
 
 Settled after session 2. The DM's counsel is **object-level only**: state

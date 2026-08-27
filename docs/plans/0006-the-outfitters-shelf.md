@@ -1,6 +1,6 @@
 # Plan 0006 — The outfitter's shelf: kit, relics, and stances worth learning
 
-Status: READY (implement after 0005; its exit prices and career
+Status: DONE (implemented after 0005; its exit prices and career
 tournament are assumed throughout)
 
 ## Sources
@@ -203,6 +203,6 @@ delver). No migration.
 - [x] session.py commands + market/status; pages.py sheet lines
 - [x] bench_policy.py: six-stance table + shopping policies
 - [x] contract suites green (`python -m unittest`)
-- [ ] benches re-run; BENCHLOG entry vs targets
-- [ ] PLAYBOOK kit/relic paragraph
-- [ ] CLAUDE.md status updated
+- [x] benches re-run; BENCHLOG entry vs targets
+- [x] PLAYBOOK kit/relic paragraph
+- [x] CLAUDE.md status updated
