@@ -1,19 +1,35 @@
-"""UNDERSTORY ui/ page writers. Engine-written pages are rewritten whole on
-every save; the DM-authored pages (ui/scene.md, ui/chronicle.md) are never
-touched here — `sheet` only commits them. Git is best-effort, never fatal.
+"""UNDERSTORY run-page writers. A playthrough lives in its own folder,
+runs/<delver-slug>/: the engine-written pages (rewritten whole on every
+save), a committed snapshot of the save, and the DM-authored pages
+(scene.md, chronicle.md), which are never touched here -- `sheet` only
+commits them. Git is best-effort, never fatal.
 """
 
+import json
 import os
+import re
 import subprocess
 
 import engine
 
-UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui")
+ROOT = os.path.dirname(os.path.abspath(__file__))
+RUNS_DIR = os.path.join(ROOT, "runs")
 
 
-def _write(name, text):
-    os.makedirs(UI_DIR, exist_ok=True)
-    with open(os.path.join(UI_DIR, name), "w", encoding="utf-8") as f:
+def run_slug(save):
+    """The run folder name, derived from the delver's name -- never stored,
+    so the save shape does not change. 'Marek Culvert' -> 'marek-culvert'."""
+    return re.sub(r"[^a-z0-9]+", "-", save["delver"]["name"].lower()).strip("-")
+
+
+def run_dir(save):
+    return os.path.join(RUNS_DIR, run_slug(save))
+
+
+def _write(save, name, text):
+    d = run_dir(save)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, name), "w", encoding="utf-8") as f:
         f.write(text)
 
 
@@ -72,7 +88,7 @@ def write_delver(save):
         for item in d["salvage"]:
             lines.append("    - %s (worth %d)" % (item["name"], item["value"]))
     lines.append("")
-    _write("delver.txt", "\n".join(lines) + "\n")
+    _write(save, "delver.txt", "\n".join(lines) + "\n")
 
 
 def write_map(save):
@@ -98,7 +114,7 @@ def write_map(save):
         lines.append("   |")
         lines.append("  (the Understory waits)")
     lines.append("")
-    _write("map.txt", "\n".join(lines) + "\n")
+    _write(save, "map.txt", "\n".join(lines) + "\n")
 
 
 def write_history(save):
@@ -108,7 +124,7 @@ def write_history(save):
     for entry in save["history"]:
         lines.append("- " + entry)
     lines.append("")
-    _write("history.md", "\n".join(lines) + "\n")
+    _write(save, "history.md", "\n".join(lines) + "\n")
 
 
 def _beat_line(imp, text, beat):
@@ -124,10 +140,10 @@ def write_fight(save):
     short = [head, "=" * len(head), ""]
     short += [_beat_line(imp, text, beat) for imp, text, beat in lf["events"]
               if imp >= 1 or beat]
-    _write("fight.txt", "\n".join(short) + "\n")
+    _write(save, "fight.txt", "\n".join(short) + "\n")
     full = [head, "=" * len(head), "", "(every roll; the short log is fight.txt)", ""]
     full += [("* " if imp else "  ") + _beat_line(imp, text, beat) for imp, text, beat in lf["events"]]
-    _write("fight_full.txt", "\n".join(full) + "\n")
+    _write(save, "fight_full.txt", "\n".join(full) + "\n")
 
 
 def write_pages(save):
@@ -135,17 +151,24 @@ def write_pages(save):
     write_map(save)
     write_history(save)
     write_fight(save)
+    # The committed snapshot is what a later session's `resume` picks up:
+    # the live save.json is untracked and dies with the web container.
+    _write(save, "save.json", json.dumps(save, indent=1) + "\n")
 
 
 def sheet_commit(message):
-    """Commit every existing ui/ page. Best-effort; never raises."""
+    """Commit every existing run page, then push the session branch so the
+    GitHub blob pages the player reads stay current. Best-effort; never
+    raises -- git trouble must never kill the table."""
     try:
-        root = os.path.dirname(os.path.abspath(__file__))
-        subprocess.run(["git", "add", "ui"], cwd=root, capture_output=True, timeout=30)
-        done = subprocess.run(["git", "commit", "-m", message], cwd=root,
+        subprocess.run(["git", "add", "runs"], cwd=ROOT, capture_output=True, timeout=30)
+        done = subprocess.run(["git", "commit", "-m", message], cwd=ROOT,
                               capture_output=True, timeout=30, text=True)
+        pushed = subprocess.run(["git", "push", "origin", "HEAD"], cwd=ROOT,
+                                capture_output=True, timeout=60)
+        note = "" if pushed.returncode == 0 else "  (push failed; pages are local only)"
         if done.returncode == 0:
-            return "committed: " + message
-        return "nothing new to commit"
+            return "committed: " + message + note
+        return "nothing new to commit" + note
     except Exception as exc:  # git trouble must never kill the table
         return "git trouble (ignored): %s" % exc

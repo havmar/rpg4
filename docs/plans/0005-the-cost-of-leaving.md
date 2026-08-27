@@ -90,8 +90,8 @@ and re-run.
   what does not fit stays stashed. Lines narrate the recovery.
 - Stashes persist across surfacings (that is the point: value waiting at
   depth is the pull back down). They are lost with the delver. `surface`
-  does not touch them; `ui/map.txt` prints `..stash: <n> items` under
-  each depth that holds one, and `ui/delver.txt` gains a stash summary
+  does not touch them; the run's `map.txt` prints `..stash: <n> items`
+  under each depth that holds one, and `delver.txt` gains a stash summary
   line when any exist.
 
 ### The career tournament (`bench_policy.py --careers N`)

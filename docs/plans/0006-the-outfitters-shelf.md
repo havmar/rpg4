@@ -120,7 +120,7 @@ only known stances.
 ### Market and pages
 
 `market` lists weapons, armors, kit, and unlearned stances with prices;
-`status` and `ui/delver.txt` show kit held, the equipped relic, and known
+`status` and the run's `delver.txt` show kit held, the equipped relic, and known
 stances beyond the base four.
 
 ### Save

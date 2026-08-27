@@ -11,26 +11,19 @@ instruction filename unchanged.)
 
 ## Session start — always
 
-1. **Verify the checkout is fresh against `origin/master`** — not against
-   the branch you happen to be on. A web session starts on a freshly named
-   branch, and pulling *that branch* proves nothing: it can have been cut
-   from a stale base (session 3 ran an entire opening on a checkout six
-   commits behind master this way). The SessionStart hook
-   (`.claude/hooks/session-start.sh`) does the check mechanically — read
-   its output; a line saying it fast-forwarded or could not verify is
-   load-bearing. If no hook output is visible, do its job by hand:
-   `git fetch origin master`, and if HEAD is strictly behind
-   `origin/master` with no commits of its own, `git merge --ff-only
-   origin/master`. A dirty tree is preserved and understood first, never
-   pulled over. A play branch mid-playthrough is *supposed* to be behind
-   master — a playthrough keeps its engine; never merge master into a
-   live game.
+1. **Stay on the branch the session opened on.** Never create, rename,
+   or switch branches — branch manipulation at the table is what
+   destroyed the previous remote (see Status). The web cuts every
+   session branch from current `origin/master`; if the checkout looks
+   older than this file's Status claims, verify by hand (`git fetch
+   origin master` and compare) before trusting anything. A dirty tree is
+   preserved and understood first, never pulled over.
 2. Read `docs/CHARTER.md` — the constitution. It overrides habit.
 3. Settle the session MODE before doing anything else:
 
 - **Play mode** (running or testing a game): load `docs/PLAYBOOK.md`,
-  `docs/SETTING.md`, the `ui/` pages, `LEDGER.md`, and the save. Nothing
-  in the dev docs governs the table.
+  `docs/SETTING.md`, the run's pages (`runs/<delver>/`), `LEDGER.md`, and
+  the save. Nothing in the dev docs governs the table.
 - **Dev mode** (changing the game): load `docs/ENGINE.md` first — never
   start a dev task from this dispatcher alone.
 
@@ -43,7 +36,7 @@ instruction filename unchanged.)
   honest. Design sessions argue every plan against it.
 - `docs/SETTING.md` — the world seed and tone. Canon accretes in play;
   never contradict a committed fact.
-- `docs/PLAYBOOK.md` — how the table is run: session flow, the ui/ pages
+- `docs/PLAYBOOK.md` — how the table is run: session flow, the run pages
   and message protocol, settled non-numeric rules of play.
 - `docs/ENGINE.md` — how the game is built: architecture, save model,
   testing/bench infrastructure, code conventions, dev process.
@@ -62,9 +55,11 @@ instruction filename unchanged.)
 - **No backwards compatibility, ever.** No migration code. A feature that
   breaks the save means a fresh save (a new delver). Only `LEDGER.md`
   survives wipes.
-- **Git is the save system.** One playthrough per `play/<delver>` branch;
-  ui/ pages committed, `save.json` untracked. Engine code and play state
-  are always separate commits, on separate branches.
+- **Git is the save system.** One playthrough per `runs/<delver>/` folder,
+  merged to master at wrap-up; its pages and save snapshot are committed,
+  only the root working `save.json` stays untracked. Sessions run on the
+  branch the web named — no branch creation, renaming, or switching, ever.
+  Engine code and play state are always separate commits.
 - **No GUI, no external services, no separate agent process.** The stack
   is this repo plus the agent session.
 
@@ -74,9 +69,10 @@ v0.1 playable (plan 0001, benched 2026-08-23): full expedition loop —
 creation, delve, autocombat with one pause, camp, surface, bank, train,
 buy — through `session.py`, with contract suites (`python -m unittest`)
 and benches (`python tune.py`). The Vitric Age runs 6 depths and has a
-sealed floor. Two playthroughs are on the shelf — `play/hallam-rasp`
-(session 1, abandoned mid-descent, ledgered) and `play/teodor-slake`
-(session 2, dead at depth 5). Both delvers died on day 1 having banked
+sealed floor. Two early playthroughs — Hallam Rasp (session 1, abandoned
+mid-descent, ledgered) and Teodor Slake (session 2, dead at depth 5) —
+survive only as Ledger pages (their branches were lost in the 2026-08-27
+infrastructure loss, below). Both delvers died on day 1 having banked
 nothing, so the haven layer is still untested. Sessions 1–2 were harvested
 by the 2026-08-25 design session, which produced plans
 `0002-combat-that-costs`, `0003-a-reason-to-surface`, and
@@ -97,14 +93,30 @@ it — a passage holding nothing but lurkers sounds exactly like a place to
 rest. The unchosen ways close behind you; the map remembers them.
 
 All three plans from the 2026-08-25 design session have landed. Session 3
-(`play/marek-culvert`, ledgered) was played on a stale checkout — the
-2026-08-23 engine — so the v4 engine remains unplayed; the freshness guard
-now exists because of it.
+(Marek Culvert, ledgered) was played on a stale checkout — the 2026-08-23
+engine — so the v4 engine remains unplayed.
 
 The 2026-08-26 design session wrote `docs/MECHANICS.md` (the mechanical
 north star), landed `bench_policy.py` (the policy-tournament bench the
 plan-0002 benchlog caveat asked for; it confirmed the skirmish hedge
 survives 0002–0004 untouched), and produced plans
 `0005-the-cost-of-leaving` and `0006-the-outfitters-shelf`, both READY.
+
+**2026-08-27 — infrastructure loss and recovery.** The original remote
+became unusable (sessions kept checking out the first historical commit;
+three repair passes failed — root cause: branch manipulation done at the
+repo's beginning). The repo was re-uploaded as a flat copy to a fresh
+remote: **all commit history and all branches before 2026-08-27 are
+lost**, including the three play branches. What crossed: the working
+tree — code, docs, LEDGER.md, PLAYNOTES.md, and Marek Culvert's final
+pages (salvaged into `runs/marek-culvert/`); Hallam Rasp's and Teodor
+Slake's chronicles are gone. The same session replaced the branch model:
+playthroughs now live in `runs/<delver>/` folders merged to master at
+wrap-up (playbook §"One delver per folder"); sessions never create or
+rename branches; the SessionStart freshness-guard hook was retired with
+the old remote. One remnant to clean by hand: the remote branch
+`zz-push-policy-probe` (a push-policy test; deleting refs from a session
+is blocked).
+
 Next milestone: implement 0005 then 0006, then a playthrough on the
 resulting engine (save v6). Update this status as milestones land.

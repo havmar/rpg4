@@ -37,9 +37,14 @@ needed, coherence kept by the agent, no central game loop required.
   the DM's **override surface** for things no command provides. Convention:
   use it for story reasons, never to edit away an outcome merely disliked.
   Every command reloads the file fresh.
-- `save.json` stays untracked by default. During development, saves are
-  disposable: wreck them with test games, start over, move on. A keeper
-  playthrough is a named exception committed explicitly.
+- The root `save.json` stays untracked: it is the live working state, and
+  during development saves are disposable — wreck them with test games,
+  start over, move on. But every save write also snapshots the state into
+  the playthrough's run folder (`runs/<delver-slug>/save.json`, written by
+  `pages.write_pages`), and that snapshot IS committed by `sheet`: web
+  containers are ephemeral, so the committed snapshot is the only save
+  that survives a play session. `session.py resume <slug>` copies it back
+  into place; its version gate is the permadeath-by-patch check.
 - Every module exposes a standalone eyeball check
   (`python <module>.py --seed N ...` prints a sample) so generators and
   content can be inspected without a full game.
@@ -52,7 +57,10 @@ needed, coherence kept by the agent, no central game loop required.
   engine so the engine stays generic.
 - generator modules (strata, encounters, relics, delvers) — self-validating.
 - `session.py` — the thin CLI driver.
-- `ui/` — committed player-facing pages (rules in the playbook).
+- `runs/<delver-slug>/` — one folder per playthrough: committed
+  player-facing pages plus the save snapshot (rules in the playbook).
+  The shelf lives on master; play-session branches merge into it at
+  wrap-up and are then disposable.
 - `test_<system>.py`, `bench_*.py`, `tune.py`, `docs/BENCHLOG.md`.
 - `LEDGER.md` — the legacy ledger (see playbook; survives everything).
 
@@ -157,13 +165,14 @@ chat, carries context between them.
   session loses nothing.
 - **Review sessions** (separate, for bigger changes). Review the diff
   against the plan file — the plan is the review contract.
-- **Play sessions** (Opus, on a `play/<delver>` branch). Governed by the
-  playbook only. Every play session ends with the wrap-up rite
-  (playbook), which is how play feeds back into design.
+- **Play sessions** (Opus, on whatever branch Claude Code web names —
+  never create or rename branches). Governed by the playbook only. Every
+  play session ends with the wrap-up rite (playbook), which merges the
+  session into master and is how play feeds back into design.
 
 **The feedback loop**: play wrap-ups append structured notes to
-`docs/PLAYNOTES.md`, mirrored to the main branch (same rite as the
-Ledger). A design session starts by reading PLAYNOTES, marks each item
+`docs/PLAYNOTES.md`, carried to master by the wrap-up merge. A design
+session starts by reading PLAYNOTES, marks each item
 HARVESTED (with the plan file that answers it) or DECLINED (with one line
 why), and never deletes entries.
 

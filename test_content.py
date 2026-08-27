@@ -609,18 +609,21 @@ class TestTheOpeningCommand(unittest.TestCase):
         import pages
         import session
         with tempfile.TemporaryDirectory() as tmp:
-            old_save, old_ui = session.SAVE_PATH, pages.UI_DIR
+            old_save, old_runs = session.SAVE_PATH, pages.RUNS_DIR
             session.SAVE_PATH = os.path.join(tmp, "save.json")
-            pages.UI_DIR = os.path.join(tmp, "ui")
+            pages.RUNS_DIR = os.path.join(tmp, "runs")
             try:
                 with contextlib.redirect_stdout(io.StringIO()):
                     session.main(["new", "--seed", "31337"])
                 with open(session.SAVE_PATH, encoding="utf-8") as f:
                     save = json.load(f)
-                with open(os.path.join(pages.UI_DIR, "delver.txt"), encoding="utf-8") as f:
+                with open(os.path.join(pages.run_dir(save), "delver.txt"), encoding="utf-8") as f:
                     sheet = f.read()
+                with open(os.path.join(pages.run_dir(save), "save.json"), encoding="utf-8") as f:
+                    snapshot = json.load(f)
             finally:
-                session.SAVE_PATH, pages.UI_DIR = old_save, old_ui
+                session.SAVE_PATH, pages.RUNS_DIR = old_save, old_runs
+        self.assertEqual(snapshot, save)
         self.assertEqual(save["version"], engine.SAVE_VERSION)
         self.assertEqual(save["odds_counter"], 0)
         self.assertTrue(save["expedition"]["active"])
@@ -633,6 +636,34 @@ class TestTheOpeningCommand(unittest.TestCase):
         self.assertIn("item", save["wake"]["commission"])
         self.assertIn("CRAFT  provision", sheet)
         self.assertIn("SATCHEL", sheet)
+
+    def test_resume_restores_the_live_save_from_the_run_snapshot(self):
+        """A web container is ephemeral: the committed runs/<slug>/save.json
+        snapshot is the only save that survives a session. `resume` copies
+        it back into place; `new` refuses a name already on the shelf."""
+        import pages
+        import session
+        with tempfile.TemporaryDirectory() as tmp:
+            old_save, old_runs = session.SAVE_PATH, pages.RUNS_DIR
+            session.SAVE_PATH = os.path.join(tmp, "save.json")
+            pages.RUNS_DIR = os.path.join(tmp, "runs")
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    session.main(["new", "--seed", "31337"])
+                with open(session.SAVE_PATH, encoding="utf-8") as f:
+                    save = json.load(f)
+                os.remove(session.SAVE_PATH)  # the container died
+                with contextlib.redirect_stdout(io.StringIO()):
+                    session.main(["resume", pages.run_slug(save)])
+                with open(session.SAVE_PATH, encoding="utf-8") as f:
+                    resumed = json.load(f)
+                os.remove(session.SAVE_PATH)
+                with self.assertRaises(SystemExit):  # same stranger, same shelf slot
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        session.main(["new", "--seed", "31337"])
+            finally:
+                session.SAVE_PATH, pages.RUNS_DIR = old_save, old_runs
+        self.assertEqual(resumed, save)
 
 
 class TestRumors(unittest.TestCase):
@@ -837,13 +868,13 @@ class TestForks(unittest.TestCase):
         cat, save = self.forked()
         content.advance_delve(cat, save, passage=1)
         with tempfile.TemporaryDirectory() as tmp:
-            old, pages.UI_DIR = pages.UI_DIR, tmp
+            old, pages.RUNS_DIR = pages.RUNS_DIR, tmp
             try:
                 pages.write_map(save)
-                with open(os.path.join(tmp, "map.txt"), encoding="utf-8") as f:
+                with open(os.path.join(pages.run_dir(save), "map.txt"), encoding="utf-8") as f:
                     text = f.read()
             finally:
-                pages.UI_DIR = old
+                pages.RUNS_DIR = old
         for entry in save["expedition"]["declined"]:
             self.assertIn("..unopened: %s" % entry["rumor"], text)
 

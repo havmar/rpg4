@@ -72,29 +72,34 @@ drum**, the in-game instrument that answers odds questions
 
 ## GitHub is the player's UI
 
-The player-facing UI is a set of standing pages in `ui/`, committed to the
-play branch and read as GitHub blob pages. Only `save.json` stays untracked.
+The player-facing UI is a set of standing pages in the playthrough's run
+folder, `runs/<delver-slug>/`, committed and read as GitHub blob pages.
+Only the root `save.json` (the live working save) stays untracked; the run
+folder carries its own committed snapshot of it.
 
 Engine-written pages (rewritten on every save; the engine owns them):
 
-- `ui/delver.txt` — the character sheet.
-- `ui/map.txt` — what the expedition has charted.
-- `ui/history.md` — the campaign history: what the delver did, what they
+- `delver.txt` — the character sheet.
+- `map.txt` — what the expedition has charted.
+- `history.md` — the campaign history: what the delver did, what they
   killed, what Wake knows them for. Doubles as the DM's continuity
   reference across sessions.
-- `ui/fight.txt` and `ui/fight_full.txt` — last-fight snapshots (short
+- `fight.txt` and `fight_full.txt` — last-fight snapshots (short
   displayed log + full every-roll detail). A new encounter replaces them.
+- `save.json` — the committed snapshot of the live save, rewritten on
+  every command. The web container is ephemeral; this snapshot is the
+  only save that survives the session, and it is what `resume` restores.
 
 DM-authored pages (the engine never writes them; `sheet` just commits them):
 
-- `ui/scene.md` — the current DM message only, rewritten whole each turn.
+- `scene.md` — the current DM message only, rewritten whole each turn.
   Its footer links to map and history.
-- `ui/chronicle.md` — the append-only transcript of the whole playthrough.
+- `chronicle.md` — the append-only transcript of the whole playthrough.
 
 ## The message protocol
 
-- **Draft–review–commit–copy**: the DM message is written into
-  `ui/scene.md` first, reread and edited there, committed, and only then
+- **Draft–review–commit–copy**: the DM message is written into the run's
+  `scene.md` first, reread and edited there, committed, and only then
   copied into chat verbatim. The chat copy is a copy, never a first draft.
   The review is a *cut pass* against the voice contract (SETTING.md
   §Voice): count the words against the budget, keep one image, cut the
@@ -102,45 +107,46 @@ DM-authored pages (the engine never writes them; `sheet` just commits them):
   If a fix happens after posting: edit the page, commit again, state the
   correction plainly — the two never silently diverge.
 - **One commit per message**: a single end-of-message command (`sheet`)
-  commits every existing page, so the player can follow the playthrough as
-  message-sized diffs. Unchanged pages are a no-op; run it anyway. Git
+  commits every existing page and pushes the session branch, so the
+  player can follow the playthrough as message-sized diffs and the blob
+  pages stay current. Unchanged pages are a no-op; run it anyway. Git
   here is best-effort and never fatal to the game.
 - The chat message carries the turn's text; under it goes exactly one
   link — the page the chat does not already contain (the delver sheet):
-  `https://github.com/<owner>/<repo>/blob/<branch>/ui/delver.txt`
+  `https://github.com/<owner>/<repo>/blob/<session-branch>/runs/<slug>/delver.txt`
   The scene page's footer leads to the rest. The full fight log is shared
   on request.
 
-## One delver per branch
+## One delver per folder; branches belong to the web
 
-A playthrough lives on its own play branch (`play/<delver-name>`), created
-when the delver first walks into Wake. `new` starts the scene and chronicle
-fresh; the old game lives on in its own branch, forever. Dev work never
-happens on a play branch; play state never commits to a dev branch.
+A playthrough lives in its own folder, `runs/<delver-slug>/` (the slug is
+the delver's name, lowercased and hyphenated — `session.py new` prints
+it), created when the delver first walks into Wake. The folder is the
+playthrough: pages, chronicle, and the committed save snapshot. At
+wrap-up it merges into master and stays there forever — the shelf is
+`runs/` on master, one folder per delver. Dev work and play state still
+never share a commit.
 
-**Starting a game from Claude Code on the web** (settled after the
-session-3 false start). The web makes you name a branch before the session
-opens — before the delver exists, and since plan 0003 the *engine* deals
-the name. So the branch you type is a placeholder, and the rite is:
+Branches are the web's scaffolding, never the table's (settled after the
+2026-08-27 infrastructure loss — branch creation and renaming at the
+table is what broke the old remote). A play session runs on exactly the
+branch Claude Code web named when the session opened. **Never create,
+rename, or switch branches.** The branch carries one session's commits
+and is gone after the wrap-up merge; the run folder is what lasts.
 
-1. Open the session on any placeholder branch (`play/next` will do).
-2. Trust the freshness guard: the SessionStart hook fast-forwards a
-   fresh branch to current `origin/master` and says so. If its line says
-   freshness was NOT verified, or there is no line, check by hand before
-   anything else — session 3 played an opening scene on a six-commits-
-   stale base, with the old chargen and an empty Ledger over committed
-   canon, because nothing forced the branch onto current master.
-3. Run `python session.py new`, meet the delver, then rename the branch
-   to the one that is theirs: `git branch -m play/<delver-name>`, and
-   push with `git push -u origin play/<delver-name>`. The placeholder
-   name is never pushed; if the web UI already pushed it, delete it
-   after the rename so the shelf holds one branch per delver.
-
-A branch is a delver's, not a session's: session two of the same game
-opens on the existing `play/<delver>` branch, where being behind master
-is normal — the playthrough keeps the engine it started on. Master
-moving underneath a live game is never a reason to merge; a new engine
-is a new delver (Charter §6).
+- **New game**: open a session, `python session.py new`. The engine deals
+  the delver, `runs/<slug>/` appears, and `sheet` commits and pushes it
+  on the session branch as play proceeds.
+- **Continuing a game**: open a fresh session (whatever branch the web
+  names — it is cut from master, which holds the shelf), then
+  `python session.py resume <slug>`. That copies the run's committed
+  save snapshot back into place as the live `save.json`, and the table
+  picks up where it left off.
+- **Permadeath by patch, literally** (Charter §6): if dev moved the
+  engine between sessions, `resume` refuses the old save version. That
+  delver's game is over — write their Ledger entry (the world moved on
+  while they were underground) and raise a new delver on the current
+  engine. Never migrate a save and never hand-edit its version field.
 
 ## The save and the override surface
 
@@ -157,8 +163,8 @@ is a new delver (Charter §6).
 version wipes included (Charter §6). When a delver dies, or a playthrough
 ends for any reason, write their entry: name, delved strata, notable deeds,
 how it ended, what Wake remembers. Entries are appended, never rewritten.
-Commit the entry on the play branch, then mirror the same change to the
-main branch so every future game inherits it. Future expeditions may find
+Commit the entry on the session branch; the wrap-up merge carries it to
+master, so every future game inherits it. Future expeditions may find
 traces of ledgered delvers in the deep.
 
 **Traces are set dressing, never hooks** (settled after session 2). A dead
@@ -173,18 +179,34 @@ a corpse, cut the price tag.
 Before a play session ends (invoked as `/wrapup`, or unprompted when the
 player says goodnight):
 
-1. Run `sheet` one last time so the pages match the table.
+1. Run `sheet` one last time so the pages and the save snapshot match
+   the table.
 2. Write a wrap-up entry and append it to `docs/PLAYNOTES.md`: date,
    delver, where the fiction stands, then two short lists — *DM notes*
    (what felt rough, joyless, or unbalanced from the DM chair; ideas that
    came up in play) and *player notes*, filled only from what the player
    already said during the session. **Do not ask feedback questions at
    the table** (settled after session 2): the player gives feedback
-   separately, in their own time, and design sessions also read the play
-   branch's `ui/chronicle.md` directly — mark a transcript analyzed in
-   the PLAYNOTES entry it feeds.
-3. Commit on the play branch, then mirror the PLAYNOTES change to the
-   main branch (same rite as the Ledger).
+   separately, in their own time, and design sessions also read the run
+   folder's `chronicle.md` directly — mark a transcript analyzed in the
+   PLAYNOTES entry it feeds.
+3. Commit on the session branch, then **merge the session into master**
+   — this is what puts the run (and its save snapshot, and any Ledger or
+   PLAYNOTES change) on master for the next session; mid-playthrough
+   sessions merge too:
+   1. `git fetch origin master && git merge origin/master` — normally a
+      no-op; if dev landed meanwhile, resolve (LEDGER/PLAYNOTES are
+      append-only, so conflicts are mechanical).
+   2. Push the session branch: `git push -u origin <session-branch>`.
+   3. Open a pull request to master and merge it immediately (GitHub MCP
+      tools: `create_pull_request`, then `merge_pull_request` with merge
+      method `merge` — keep the per-message commits). With the repo's
+      "automatically delete head branches" setting on, the branch
+      cleans itself up.
+   4. Fallback if the PR tools are unavailable: `git push origin
+      HEAD:master` merges directly (verified allowed); the session
+      branch is left behind for the player to delete — deleting refs
+      over git is blocked (403) from a web session, so never try to.
 4. Close the table in the fiction — one line, where the delver rests.
 
 PLAYNOTES is an inbox for design sessions: entries are never deleted,
@@ -192,12 +214,12 @@ only marked harvested or declined by a later design session.
 
 ## Session start (play mode)
 
-1. `git status --short --branch`, and read the freshness guard's output
-   (the SessionStart hook): a fresh branch must sit on current
-   `origin/master` before a new game starts; an existing play branch
-   plays on exactly as it is. No guard line visible → verify by hand
-   (dispatcher, step 1). Dirty tree → understand the local work first.
-2. Load this playbook, `docs/SETTING.md`, the `ui/` pages (history.md is
-   the recap), `LEDGER.md`, and the save.
-3. Confirm which play branch is checked out before touching anything.
-4. Open with a brief recap in the fiction, then take the table.
+1. `git status --short --branch`. The web named the branch and cut it
+   from master — leave it exactly as it is (no creating, renaming, or
+   switching). If the checkout looks older than CLAUDE.md's status
+   claims, verify by hand (dispatcher, step 1) before anything else.
+   Dirty tree → understand the local work first.
+2. Load this playbook, `docs/SETTING.md`, and `LEDGER.md`. New game →
+   `python session.py new`. Continuing → `python session.py resume
+   <slug>`, then read the run folder's pages (`history.md` is the recap).
+3. Open with a brief recap in the fiction, then take the table.
